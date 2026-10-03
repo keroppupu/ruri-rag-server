@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ruri 日本語 RAG サーバー (完全オフライン対応)</title>
+  <!-- オフライン対応: CDNが遮断されていても表示崩れしない完全埋め込みスタイル -->
+  <style>
+    :root {
+      --primary: #4338ca;
+      --primary-hover: #3730a3;
+      --primary-light: #e0e7ff;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --success: #10b981;
+      --success-bg: #ecfdf5;
+      --danger: #ef4444;
+      --danger-bg: #fef2f2;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Meiryo", sans-serif; background-color: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    
+    header { background: var(--primary); color: white; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header-title { font-size: 1.1rem; font-weight: 700; }
+    .header-sub { font-size: 0.75rem; color: #c7d2fe; }
+    .status-badge { background: #312e81; padding: 4px 12px; border-radius: 9999px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+
+    .main-layout { display: flex; flex: 1; overflow: hidden; }
+    
+    /* Sidebar */
+    aside { width: 280px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; justify-content: space-between; }
+    .aside-header { padding: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .aside-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .btn-new-ch { background: var(--primary-light); color: var(--primary); border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+    .btn-new-ch:hover { background: #c7d2fe; }
+    .channel-list { padding: 0 8px; overflow-y: auto; flex: 1; }
+    .channel-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 8px; margin-bottom: 4px; font-size: 0.85rem; cursor: pointer; color: var(--text); }
+    .channel-item:hover { background: #f1f5f9; }
+    .channel-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+    .channel-badge { background: #e2e8f0; color: #475569; font-size: 0.7rem; padding: 2px 6px; border-radius: 9999px; }
+    .aside-footer { padding: 16px; border-top: 1px solid var(--border); background: #f8fafc; font-size: 0.75rem; color: var(--text-muted); }
+    
+    /* Content Area */
+    main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #f1f5f9; }
+    .tabs-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+    .tab-btn { padding: 14px 0; border: none; background: none; font-size: 0.875rem; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    /* Tab: Chat */
+    .tab-chat { flex: 1; display: flex; flex-direction: column; padding: 20px 24px; overflow: hidden; }
+    .messages-box { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-right: 8px; }
+    .msg-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); max-width: 800px; font-size: 0.875rem; line-height: 1.6; }
+    .user-msg { align-self: flex-end; background: var(--primary); color: white; border-radius: 16px 16px 0 16px; padding: 10px 16px; max-width: 650px; font-size: 0.875rem; }
+    .bot-msg { align-self: flex-start; width: 100%; max-width: 800px; }
+    .input-box { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
+    .input-options { display: flex; align-items: center; gap: 16px; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px; }
+    .input-row { display: flex; gap: 8px; }
+    .text-input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 0.875rem; outline: none; }
+    .text-input:focus { border-color: var(--primary); }
+    .btn-send { background: var(--primary); color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
+    .btn-send:hover { background: var(--primary-hover); }
+
+    /* Tab: Upload */
+    .tab-upload { flex: 1; overflow-y: auto; padding: 24px; }
+    .upload-container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .upload-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+    .dropzone { border: 2px dashed #cbd5e1; background: #f8fafc; border-radius: 12px; padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--primary); background: #eef2ff; }
+    .drop-title { font-weight: 600; font-size: 0.95rem; color: var(--text); margin-bottom: 4px; }
+    .drop-desc { font-size: 0.75rem; color: var(--text-muted); }
+    .upload-params { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 0.75rem; }
+    .param-input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin-top: 4px; }
+    .upload-log { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; }
+    .log-item { padding: 10px 14px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); background: #f8fafc; }
+    .log-success { background: var(--success-bg); border-color: #a7f3d0; color: #065f46; }
+    .log-error { background: var(--danger-bg); border-color: #fecaca; color: #991b1b; }
+
+    /* Context details */
+    .context-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.75rem; }
+    .context-item { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-top: 6px; }
+    .context-badge { background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.7rem; }
+    
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div>
+      <div class="header-title">Ruri 日本語 RAG サーバー (完全オフライン対応)</div>
+      <div class="header-sub">Embedding: cl-nagoya/ruri-base | Rerank: cl-nagoya/ruri-reranker-large</div>
+    </div>
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      <span id="serverStatusText">サーバー接続中...</span>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="main-layout">
+
+    <!-- Sidebar -->
+    <aside>
+      <div class="aside-header">
+        <span class="aside-title">📁 RAG チャネル</span>
+        <button onclick="promptCreateChannel()" class="btn-new-ch">+ 新規チャネル</button>
+      </div>
+
+      <div id="channelList" class="channel-list"></div>
+
+      <div class="aside-footer">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span>選択中:</span>
+          <strong id="activeChannelName" style="color:var(--text);">default</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>登録ドキュメント数:</span>
+          <strong id="activeChannelCount" style="color:var(--primary);">0 件</strong>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Content Area -->
+    <main>
+      <!-- Navigation Tabs -->
+      <div class="tabs-bar">
+        <button id="tabChatBtn" onclick="switchTab('chat')" class="tab-btn active">💬 RAG 対話 / 検索</button>
+        <button id="tabUploadBtn" onclick="switchTab('upload')" class="tab-btn">📤 ファイル登録 (PDF / Excel / Word / PPT)</button>
+      </div>
+
+      <!-- Tab: Chat -->
+      <div id="tabChat" class="tab-chat">
+        <div id="messagesContainer" class="messages-box">
+          <div class="msg-card">
+            <h3 style="color:var(--primary); font-size:0.95rem; font-weight:700; margin-bottom:4px;">RAG システム準備完了 (エアギャップ・オフライン完全対応)</h3>
+            <p style="color:var(--text-muted); font-size:0.8rem;">
+              左のサイドバーからチャネルを選択し、ドキュメントのアップロードや検索・質問を行えます。<br>
+              日本語特化モデル「Ruri」による高度なセマンティック検索とリランキング（再順位付け）が自動実行されます。
+            </p>
+          </div>
+        </div>
+
+        <div class="input-box">
+          <div class="input-options">
+            <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" id="genAnswerCheck" checked>
+              <span>Ollamaで回答生成 (qwen3.5:9b)</span>
+            </label>
+            <span>|</span>
+            <label style="display:flex; align-items:center; gap:4px;">
+              <span>Rerank取得件数:</span>
+              <select id="topNSelect" style="border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:0.75rem;">
+                <option value="1">1</option>
+                <option value="3" selected>3</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+          </div>
+          <form id="chatForm" onsubmit="handleSendQuery(event)" class="input-row">
+            <input type="text" id="queryInput" placeholder="チャネルに関する質問や検索キーワードを入力..." class="text-input" required>
+            <button type="submit" id="sendBtn" class="btn-send">送信</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Tab: Upload -->
+      <div id="tabUpload" class="tab-upload hidden">
+        <div class="upload-container">
+          <div class="upload-card">
+            <h2 style="font-size:1rem; font-weight:700; margin-bottom:4px;">ファイルアップロード</h2>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:16px;">
+              現在のチャネル (<strong style="color:var(--primary);" class="activeChannelText">default</strong>) に文書を登録します。<br>
+              対応形式: <strong>PDF (.pdf), Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), Text (.txt, .md, .csv)</strong>
+            </p>
+
+            <div id="dropzone" 
+                 class="dropzone"
+                 ondragover="handleDragOver(event)" 
+                 ondragleave="handleDragLeave(event)" 
+                 ondrop="handleDrop(event)"
+                 onclick="document.getElementById('fileInput').click()">
+              <div style="font-size:2rem; margin-bottom:8px;">📄</div>
+              <div class="drop-title">ここにファイルをドラッグ＆ドロップ、またはクリックして選択</div>
+              <div class="drop-desc">自動でテキスト抽出・チャンク分割・Ruri埋め込みが行われます</div>
+              <input type="file" id="fileInput" style="display:none;" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv" onchange="handleFileSelect(event)">
+            </div>
+
+            <div class="upload-params">
+              <div>
+                <label style="font-weight:600;">チャンクサイズ (文字数):</label>
+                <input type="number" id="chunkSizeInput" value="500" class="param-input">
+              </div>
+              <div>
+                <label style="font-weight:600;">オーバーラップ (文字数):</label>
+                <input type="number" id="chunkOverlapInput" value="50" class="param-input">
+              </div>
+            </div>
+
+            <div id="uploadStatusLog" class="upload-log hidden"></div>
+          </div>
+
+          <div class="upload-card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <h3 style="font-size:0.9rem; font-weight:700;">チャネル内データのクリア</h3>
+              <p style="font-size:0.75rem; color:var(--text-muted);">選択中チャネルのすべての埋め込みベクトルとデータを削除します。</p>
+            </div>
+            <button onclick="handleClearCurrentChannel()" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:8px 14px; border-radius:8px; font-size:0.75rem; font-weight:600; cursor:pointer;">
+              全データをクリア
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    let activeChannel = "default";
+    let channels = [];
+
+    window.addEventListener("DOMContentLoaded", () => {
+      fetchHealth();
+      loadChannels();
+    });
+
+    async function fetchHealth() {
+      try {
+        const res = await fetch("/health");
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById("serverStatusText").textContent = `稼働中 (${data.embedding_model})`;
+        }
+      } catch (e) {
+        document.getElementById("serverStatusText").textContent = "サーバー接続失敗";
+      }
+    }
+
+    async function loadChannels() {
+      try {
+        const res = await fetch("/channels");
+        if (res.ok) {
+          channels = await res.json();
+          renderChannelList();
+        }
+      } catch (e) {
+        console.error("チャネル取得失敗:", e);
+      }
+    }
+
+    function renderChannelList() {
+      const container = document.getElementById("channelList");
+      container.innerHTML = "";
+
+      channels.forEach(ch => {
+        const isActive = ch.name === activeChannel || ch.id === activeChannel;
+        const div = document.createElement("div");
+        div.className = `channel-item ${isActive ? "active" : ""}`;
+        div.onclick = () => selectChannel(ch.name);
+
+        div.innerHTML = `
+          <div style="display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis;">
+            <span>${isActive ? '📂' : '📁'}</span>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(ch.name)}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="channel-badge">${ch.count}</span>
+            ${ch.name !== 'default' ? `
+              <span onclick="event.stopPropagation(); deleteChannel('${ch.name}')" 
+                    style="color:#94a3b8; cursor:pointer; font-weight:bold; padding:0 4px;" title="削除">✕</span>
+            ` : ''}
+          </div>
+        `;
+        container.appendChild(div);
+      });
+
+      const current = channels.find(c => c.name === activeChannel || c.id === activeChannel);
+      document.getElementById("activeChannelName").textContent = activeChannel;
+      document.querySelectorAll(".activeChannelText").forEach(el => el.textContent = activeChannel);
+      document.getElementById("activeChannelCount").textContent = current ? `${current.count} 件` : "0 件";
+    }
+
+    function selectChannel(name) {
+      activeChannel = name;
+      renderChannelList();
+    }
+
+    async function promptCreateChannel() {
+      const name = prompt("新規チャネル名を入力してください（例: sales_docs, manual, project_a）:");
+      if (!name) return;
+      try {
+        const res = await fetch("/channels", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim() })
+        });
+        if (res.ok) {
+          await loadChannels();
+          selectChannel(name.trim());
+        } else {
+          const err = await res.json();
+          alert("作成失敗: " + (err.detail || "エラー"));
+        }
+      } catch (e) {
+        alert("通信エラー: " + e.message);
+      }
+    }
+
+    async function deleteChannel(name) {
+      if (!confirm(`チャネル「${name}」と全ドキュメントを削除しますか？`)) return;
+      try {
+        const res = await fetch(`/channels/${encodeURIComponent(name)}`, { method: "DELETE" });
+        if (res.ok) {
+          activeChannel = "default";
+          await loadChannels();
+        }
+      } catch (e) {
+        alert("削除エラー: " + e.message);
+      }
+    }
+
+    function switchTab(tab) {
+      const chatBtn = document.getElementById("tabChatBtn");
+      const uploadBtn = document.getElementById("tabUploadBtn");
+      const chatView = document.getElementById("tabChat");
+      const uploadView = document.getElementById("tabUpload");
+
+      if (tab === "chat") {
+        chatBtn.classList.add("active");
+        uploadBtn.classList.remove("active");
+        chatView.classList.remove("hidden");
+        uploadView.classList.add("hidden");
+      } else {
+        uploadBtn.classList.add("active");
+        chatBtn.classList.remove("active");
+        uploadView.classList.remove("hidden");
+        chatView.classList.add("hidden");
+      }
+    }
+
+    function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add("dragover"); }
+    function handleDragLeave(e) { e.preventDefault(); e.currentTarget.classList.remove("dragover"); }
+    function handleDrop(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove("dragover");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadFiles(e.dataTransfer.files);
+      }
+    }
+    function handleFileSelect(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        uploadFiles(e.target.files);
+      }
+    }
+
+    async function uploadFiles(files) {
+      const logContainer = document.getElementById("uploadStatusLog");
+      logContainer.classList.remove("hidden");
+      const chunkSize = document.getElementById("chunkSizeInput").value || 500;
+      const chunkOverlap = document.getElementById("chunkOverlapInput").value || 50;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const statusItem = document.createElement("div");
+        statusItem.className = "log-item";
+        statusItem.innerHTML = `
+          <span>📄 <strong>${escapeHtml(file.name)}</strong> (${(file.size / 1024).toFixed(1)} KB)</span>
+          <span style="color:var(--text-muted);">パース & Ruri ベクトル化中...</span>
+        `;
+        logContainer.prepend(statusItem);
+
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("chunk_size", chunkSize);
+        formData.append("chunk_overlap", chunkOverlap);
+
+        try {
+          const res = await fetch(`/channels/${encodeURIComponent(activeChannel)}/upload`, {
+            method: "POST",
+            body: formData
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            statusItem.className = "log-item log-success";
+            statusItem.innerHTML = `
+              <span>✅ <strong>${escapeHtml(file.name)}</strong></span>
+              <span>${data.chunks_count} チャンク登録完了 (総数: ${data.total_documents} 件)</span>
+            `;
+          } else {
+            const err = await res.json();
+            statusItem.className = "log-item log-error";
+            statusItem.innerHTML = `
+              <span>⚠️ <strong>${escapeHtml(file.name)}</strong></span>
+              <span>エラー: ${escapeHtml(err.detail || '登録失敗')}</span>
+            `;
+          }
+        } catch (e) {
+          statusItem.className = "log-item log-error";
+          statusItem.innerHTML = `<span>通信エラー: ${escapeHtml(e.message)}</span>`;
+        }
+      }
+      await loadChannels();
+    }
+
+    async function handleClearCurrentChannel() {
+      if (!confirm(`チャネル「${activeChannel}」のデータを全てクリアしますか？`)) return;
+      try {
+        const res = await fetch(`/channels/${encodeURIComponent(activeChannel)}/documents`, { method: "DELETE" });
+        if (res.ok) {
+          alert("クリアが完了しました");
+          await loadChannels();
+        }
+      } catch (e) {
+        alert("エラー: " + e.message);
+      }
+    }
+
+    async function handleSendQuery(e) {
+      e.preventDefault();
+      const input = document.getElementById("queryInput");
+      const query = input.value.trim();
+      if (!query) return;
+
+      const genAnswer = document.getElementById("genAnswerCheck").checked;
+      const topN = parseInt(document.getElementById("topNSelect").value, 10);
+      const sendBtn = document.getElementById("sendBtn");
+
+      appendUserMessage(query);
+      input.value = "";
+      sendBtn.disabled = true;
+      sendBtn.textContent = "処理中...";
+
+      const botMsgId = "bot_" + Date.now();
+      appendBotPlaceholder(botMsgId);
+
+      try {
+        const res = await fetch(`/channels/${encodeURIComponent(activeChannel)}/rag`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: query,
+            initial_top_k: 10,
+            final_top_n: topN,
+            generate_answer: genAnswer
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          renderBotResponse(botMsgId, data);
+        } else {
+          const err = await res.json();
+          updateBotMessage(botMsgId, `<p style="color:var(--danger); font-weight:bold;">エラー: ${escapeHtml(err.detail || 'Unknown')}</p>`);
+        }
+      } catch (err) {
+        updateBotMessage(botMsgId, `<p style="color:var(--danger); font-weight:bold;">通信エラー: ${escapeHtml(err.message)}</p>`);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "送信";
+      }
+    }
+
+    function appendUserMessage(text) {
+      const container = document.getElementById("messagesContainer");
+      const div = document.createElement("div");
+      div.className = "user-msg";
+      div.textContent = text;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function appendBotPlaceholder(id) {
+      const container = document.getElementById("messagesContainer");
+      const div = document.createElement("div");
+      div.id = id;
+      div.className = "bot-msg msg-card";
+      div.innerHTML = `<span style="color:var(--primary);">⏳ Ruri で類似度検索とリランキングを実行中...</span>`;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function updateBotMessage(id, html) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = html;
+      }
+    }
+
+    function renderBotResponse(id, data) {
+      let html = "";
+
+      if (data.answer) {
+        html += `<div style="white-space:pre-wrap; margin-bottom:12px;">${escapeHtml(data.answer)}</div>`;
+      } else {
+        html += `<p style="color:var(--text-muted); font-size:0.75rem; margin-bottom:8px;">検索 & Rerank 完了 (回答生成なし)</p>`;
+      }
+
+      if (data.contexts && data.contexts.length > 0) {
+        html += `
+          <div class="context-box">
+            <details>
+              <summary style="cursor:pointer; color:var(--primary); font-weight:600; user-select:none;">
+                🔍 参照した根拠ドキュメント (${data.contexts.length} 件 - Rerank 順)
+              </summary>
+              <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+        `;
+
+        data.contexts.forEach((c, idx) => {
+          const meta = c.metadata || {};
+          const source = meta.source || "テキスト";
+          const section = meta.section ? ` [${meta.section}]` : "";
+          const score = c.rerank_score !== undefined ? c.rerank_score.toFixed(3) : "-";
+
+          html += `
+            <div class="context-item">
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-weight:600; color:var(--text);">
+                <span>#${idx + 1} ${escapeHtml(source)}${escapeHtml(section)}</span>
+                <span class="context-badge">Rerankスコア: ${score}</span>
+              </div>
+              <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.4;">${escapeHtml(c.content)}</div>
+            </div>
+          `;
+        });
+
+        html += `
+              </div>
+            </details>
+          </div>
+        `;
+      } else {
+        html += `<p style="color:#b45309; font-size:0.75rem; margin-top:8px;">⚠️ チャネル内に関連する情報が見つかりませんでした。</p>`;
+      }
+
+      updateBotMessage(id, html);
+      const container = document.getElementById("messagesContainer");
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return str.replace(/[&<>"']/g, function(m) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+      });
+    }
+  </script>
+</body>
+</html>

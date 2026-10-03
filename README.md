@@ -52,9 +52,7 @@ ruri-rag-server/
 
 ## 🚀 起動方法
 
-### 1. Docker Compose での起動（推奨）
-
-Hugging Face のキャッシュと ChromaDB のデータを Docker ボリュームで保持するため、コンテナを再起動してもモデルの再ダウンロードが発生しません。
+### 1. 通常の起動（オンライン環境）
 
 ```bash
 cd /Users/pupu/.gemini/antigravity/scratch/ruri-rag-server
@@ -67,6 +65,63 @@ docker compose logs -f
 ```
 
 起動後、ブラウザで **`http://localhost:8000`** にアクセスすると Web UI が利用できます。
+
+---
+
+## 🔒 完全オフライン（エアギャップ環境）でのセットアップ手順
+
+インターネットに接続されていない閉域環境に持ち込んでセットアップ・稼働させる手順です。
+本システムは **「Dockerイメージのパッケージ化」** と **「Ollamaモデルの移行」** の2ステップで完全にオフライン動作します。
+
+### ステップ 1: オンラインマシンでの準備（USBへのエクスポート）
+
+#### 1-1. RAG サーバーのオフラインパッケージを作成
+同梱のパッケージ作成スクリプトを実行すると、Ruriモデルを内包したDockerイメージと起動設定が `offline_dist/` フォルダに自動出力されます。
+
+```bash
+cd ruri-rag-server
+./scripts/export_offline_package.sh
+```
+出力された **`offline_dist` フォルダ** を USB メモリ等にコピーします。
+
+#### 1-2. Ollama の LLM モデルをダウンロードしてコピー
+ホストマシンで Ollama のモデル（`qwen3.5:9b` 等）を事前取得します。
+
+```bash
+ollama pull qwen3.5:9b
+```
+Ollama のモデルファイル一式（保存場所: `~/.ollama/models`）を USB メモリにコピーします。
+
+---
+
+### ステップ 2: オフライン（閉域）マシンでのセットアップ＆起動
+
+USB メモリをオフラインマシンに接続します。
+
+#### 2-1. Ollama の配置と起動
+オフラインマシンの `~/.ollama/models` にモデルファイルを配置して起動します。
+
+```bash
+# モデルファイルを配置
+mkdir -p ~/.ollama/models
+cp -r /path/to/usb/models/* ~/.ollama/models/
+
+# Ollama サーバーを起動
+ollama serve
+```
+
+#### 2-2. RAG サーバーの起動
+USB の `offline_dist` フォルダ内で、起動スクリプトを実行するだけです。
+
+```bash
+cd /path/to/usb/offline_dist
+
+# イメージのインポートとコンテナ起動をワンクリック実行
+./start.sh
+```
+
+これだけで、**ネットワーク通信を一切行わずに** ブラウザ（`http://localhost:8000`）から全機能（ファイル読み込み・チャネル管理・Ruri検索・LLM回答）が即座に利用可能になります。
+
 
 ---
 

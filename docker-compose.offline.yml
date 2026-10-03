@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  ruri-rag-server:
+    image: keroppupu/ruri-rag-server:latest
+    container_name: ruri-rag-server
+    ports:
+      - "8000:8000"
+    environment:
+      - RURI_EMBED_MODEL=cl-nagoya/ruri-base
+      - RURI_RERANK_MODEL=cl-nagoya/ruri-reranker-large
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=qwen3.5:9b
+      - CHROMA_DIR=/app/data/chroma
+      - HF_HOME=/app/cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    volumes:
+      - chroma_data:/app/data/chroma
+      - hf_cache:/app/cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+  hf_cache:

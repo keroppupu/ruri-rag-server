@@ -183,3 +183,51 @@ curl -X POST "http://localhost:8000/channels/tech_docs/rag" \
     "generate_answer": true
   }'
 ```
+
+---
+
+## 🔌 Model Context Protocol (MCP) 連携
+
+本 RAG サーバーには、**GitLab Duo / GitLab Workflow (VS Code) / Claude Desktop / Cursor / Antigravity** 等の AI クライアントから直接ナレッジ検索・質問ができる **MCP サーバー (`mcp_server.py`)** が同梱されています。
+
+### 提供ツール一覧
+
+| ツール名 | 説明 |
+| :--- | :--- |
+| `search_knowledge_base` | Ruriモデル（Embedding + Rerank）でチャネル内を検索し、高精度な根拠テキストを取得 |
+| `ask_rag` | ドキュメント検索とローカル LLM（Ollama）回答生成を一括実行 |
+| `list_channels` | 登録済みチャネル一覧と各ドキュメント件数を取得 |
+| `index_text` | テキストデータを指定チャネルに直接登録・ベクトル化 |
+
+### GitLab Duo / VS Code での設定例
+
+VS Code の `settings.json`（または GitLab Duo の MCP 設定ファイル）に以下を追加します：
+
+```json
+{
+  "gitlab.duo.mcpServers": {
+    "ruri-rag": {
+      "command": "python3",
+      "args": ["/絶対パス/ruri-rag-server/mcp_server.py"],
+      "env": {
+        "RAG_SERVER_URL": "http://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+※ Docker コンテナ経由で実行する場合:
+```json
+{
+  "gitlab.duo.mcpServers": {
+    "ruri-rag": {
+      "command": "docker",
+      "args": ["exec", "-i", "ruri-rag-server", "python3", "/app/mcp_server.py"]
+    }
+  }
+}
+```
+
+設定後、GitLab Duo Chat や AI チャットで「社内規定チャネルから〇〇の仕様を調べて」と入力すると、自動的に Ruri RAG の検索ツールが実行されて高精度な回答が生成されます。
+

@@ -14,8 +14,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# アプリケーションコードのコピー
+# アプリケーションコードとMCPサーバーのコピー
 COPY app /app/app
+COPY mcp_server.py /app/mcp_server.py
 
 # データ永続化およびHuggingFaceキャッシュディレクトリの作成
 RUN mkdir -p /app/data/chroma /app/cache/huggingface

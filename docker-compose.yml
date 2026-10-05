@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ruri-rag-server:
     build:
@@ -11,10 +9,14 @@ services:
     environment:
       - RURI_EMBED_MODEL=cl-nagoya/ruri-base
       - RURI_RERANK_MODEL=cl-nagoya/ruri-reranker-large
+      - MM_EMBED_MODEL=jinaai/jina-clip-v1
+      - LOAD_MM_MODEL=true
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_MODEL=qwen3.5:9b
       - CHROMA_DIR=/app/data/chroma
       - HF_HOME=/app/cache/huggingface
+      - HF_HUB_OFFLINE=0
+      - TRANSFORMERS_OFFLINE=0
     volumes:
       # ベクトルDBデータ永続化
       - chroma_data:/app/data/chroma

@@ -131,6 +131,7 @@
       <div class="tabs-bar">
         <button id="tabChatBtn" onclick="switchTab('chat')" class="tab-btn active">💬 RAG 対話 / 検索</button>
         <button id="tabUploadBtn" onclick="switchTab('upload')" class="tab-btn">📤 ファイル登録 (PDF / Excel / Word / PPT)</button>
+        <button id="tabDocsBtn" onclick="switchTab('docs')" class="tab-btn">📂 ドキュメント管理</button>
       </div>
 
       <!-- Tab: Chat -->
@@ -202,6 +203,13 @@
             </div>
 
             <div id="uploadStatusLog" class="upload-log hidden"></div>
+
+            <!-- ファイル一覧表示エリア -->
+            <div id="documentList" class="document-list-area hidden">
+              <h3 style="font-size:0.85rem; font-weight:700; margin-bottom:6px;">📄 登録済みドキュメント</h3>
+              <div style="border:1px solid var(--border); border-radius:4px; padding:8px;"></div>
+            </div>
+
           </div>
 
           <div class="upload-card" style="display:flex; justify-content:space-between; align-items:center;">
@@ -419,6 +427,69 @@
       }
     }
 
+    async function loadDocuments() {
+      const container = document.getElementById("documentList");
+      if (!container) return;
+
+      container.innerHTML = `
+        <p style="color:var(--text-muted); font-style:italic;">📄 登録されたドキュメントの一覧を表示中...</p>
+      `;
+      
+      try {
+        const res = await fetch(`/channels/${encodeURIComponent(activeChannel)}/documents`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.documents || data.documents.length === 0) {
+            container.innerHTML = `
+              <p style="color:var(--text-muted); font-style:italic;">📭 このチャネルに登録されたドキュメントはありません</p>
+            `;
+          } else {
+            container.innerHTML = `
+              <div class="document-list">
+                ${data.documents.map(doc => `
+                  <div class="document-item" data-id="${doc.id}">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                      <div style="flex:1; overflow:hidden; text-overflow:ellipsis; margin-bottom:4px;">
+                        <span style="font-weight:600;">📄 ${escapeHtml(doc.filename || doc.source)}</span>
+                        ${doc.section ? `<span style="color:#7f8c8d; font-size:0.85rem;">[${escapeHtml(doc.section)}]</span>` : ''}
+                      </div>
+                      <button onclick="handleClearSingleDocument('${doc.id}')" 
+                            style="color:var(--danger); cursor:pointer; font-weight:bold; padding:4px 12px; border-radius:4px; background:#fef2f2;">🗑️ 削除</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            `;
+          }
+        } else {
+          const err = await res.json();
+          container.innerHTML = `
+            <p style="color:var(--text-muted); font-style:italic;">⚠️ ドキュメント一覧の取得に失敗しました</p>
+          `;
+        }
+      } catch (e) {
+        container.innerHTML = `
+          <p style="color:var(--danger); font-size:0.85rem;">通信エラー：${escapeHtml(e.message)}</p>
+        `;
+      }
+    }
+
+    async function handleClearSingleDocument(docId) {
+      if (!confirm('このドキュメントを削除しますか？')) return;
+      try {
+        const res = await fetch(`/channels/${encodeURIComponent(activeChannel)}/documents/${docId}`, { method: "DELETE" });
+        if (res.ok) {
+          alert("削除が完了しました");
+          await loadDocuments();
+        } else {
+          const err = await res.json();
+          alert(`削除に失敗しました：${escapeHtml(err.detail || '不明なエラー')}`);
+        }
+      } catch (e) {
+        alert("削除エラー: " + e.message);
+      }
+    }
+
     async function handleSendQuery(e) {
       e.preventDefault();
       const input = document.getElementById("queryInput");
@@ -517,9 +588,9 @@
 
           html += `
             <div class="context-item">
-              <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-weight:600; color:var(--text);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-weight:600; color:var(--text);">
                 <span>#${idx + 1} ${escapeHtml(source)}${escapeHtml(section)}</span>
-                <span class="context-badge">Rerankスコア: ${score}</span>
+                <span class="context-badge">Rerank: ${score}</span>
               </div>
               <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.4;">${escapeHtml(c.content)}</div>
             </div>

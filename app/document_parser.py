@@ -7,6 +7,10 @@ import pptx
 import openpyxl
 
 
+# ------------------------------------------------------------------ #
+#  テキスト抽出                                                         #
+# ------------------------------------------------------------------ #
+
 def extract_text_from_pdf(file_bytes: bytes) -> List[Dict[str, Any]]:
     """PDFからページごとのテキストを抽出"""
     pages = []
@@ -23,8 +27,7 @@ def extract_text_from_docx(file_bytes: bytes) -> List[Dict[str, Any]]:
     """Word(.docx)からパラグラフおよび表のテキストを抽出"""
     doc = docx.Document(io.BytesIO(file_bytes))
     sections = []
-    
-    # 段落
+
     current_para = []
     for p in doc.paragraphs:
         txt = p.text.strip()
@@ -33,7 +36,6 @@ def extract_text_from_docx(file_bytes: bytes) -> List[Dict[str, Any]]:
     if current_para:
         sections.append({"section": "本文", "text": "\n".join(current_para)})
 
-    # 表
     for t_idx, table in enumerate(doc.tables):
         table_rows = []
         for row in table.rows:
@@ -96,6 +98,161 @@ def extract_text_from_plain(file_bytes: bytes, filename: str) -> List[Dict[str, 
     return [{"section": filename, "text": text.strip()}]
 
 
+# ------------------------------------------------------------------ #
+#  画像抽出                                                             #
+# ------------------------------------------------------------------ #
+
+def extract_images_from_pdf(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
+    """
+    PDFから埋め込み画像をバイト列で抽出。
+    戻り値: [{"image_bytes": bytes, "caption": str, "metadata": dict}, ...]
+    """
+    results = []
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+        img_idx = 0
+        for page_num, page in enumerate(reader.pages):
+            if "/Resources" not in page:
+                continue
+            resources = page["/Resources"]
+            if "/XObject" not in resources:
+                continue
+            xobject = resources["/XObject"].get_object()
+            for obj_name, obj_ref in xobject.items():
+                obj = obj_ref.get_object()
+                if obj.get("/Subtype") != "/Image":
+                    continue
+                try:
+                    if "/Filter" in obj:
+                        data = obj.get_data()
+                    else:
+                        data = obj._data
+                    if len(data) < 1024:  # 1KB未満は無視
+                        continue
+                    results.append({
+                        "image_bytes": data,
+                        "caption": f"{filename} - Page {page_num + 1} - 図{img_idx + 1}",
+                        "metadata": {
+                            "source": filename,
+                            "section": f"Page {page_num + 1}",
+                            "image_index": img_idx,
+                            "modality": "image",
+                        }
+                    })
+                    img_idx += 1
+                except Exception as e:
+                    print(f"[Parser] PDF image extraction skipped: {e}")
+    except Exception as e:
+        print(f"[Parser] PDF image extraction failed: {e}")
+    return results
+
+
+def extract_images_from_pptx(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
+    """
+    PowerPoint(.pptx)から埋め込み画像を抽出。
+    各スライドの画像シェイプ（Picture）を対象とする。
+    """
+    results = []
+    try:
+        prs = pptx.Presentation(io.BytesIO(file_bytes))
+        img_idx = 0
+        for slide_num, slide in enumerate(prs.slides):
+            for shape in slide.shapes:
+                if shape.shape_type == 13:  # MSO_SHAPE_TYPE.PICTURE = 13
+                    try:
+                        image = shape.image
+                        img_bytes = image.blob
+                        if len(img_bytes) < 1024:
+                            continue
+                        # キャプションとしてスライドのタイトルや alt text を使用
+                        alt_text = ""
+                        try:
+                            alt_text = shape.name or ""
+                        except Exception:
+                            pass
+                        caption = f"{filename} - Slide {slide_num + 1} - {alt_text or f'図{img_idx + 1}'}"
+                        results.append({
+                            "image_bytes": img_bytes,
+                            "caption": caption,
+                            "metadata": {
+                                "source": filename,
+                                "section": f"Slide {slide_num + 1}",
+                                "image_index": img_idx,
+                                "shape_name": alt_text,
+                                "modality": "image",
+                            }
+                        })
+                        img_idx += 1
+                    except Exception as e:
+                        print(f"[Parser] PPTX image extraction skipped: {e}")
+    except Exception as e:
+        print(f"[Parser] PPTX image extraction failed: {e}")
+    return results
+
+
+def extract_images_from_docx(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
+    """
+    Word(.docx)から埋め込み画像を抽出。
+    DOCX は ZIP 形式なので word/media/ 内の画像を直接取得する。
+    """
+    import zipfile
+    results = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+            media_files = [f for f in z.namelist() if f.startswith("word/media/")]
+            for img_idx, media_path in enumerate(media_files):
+                try:
+                    img_bytes = z.read(media_path)
+                    if len(img_bytes) < 1024:
+                        continue
+                    ext = os.path.splitext(media_path)[1].lower()
+                    if ext not in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]:
+                        continue
+                    caption = f"{filename} - 図{img_idx + 1} ({os.path.basename(media_path)})"
+                    results.append({
+                        "image_bytes": img_bytes,
+                        "caption": caption,
+                        "metadata": {
+                            "source": filename,
+                            "section": "本文",
+                            "image_index": img_idx,
+                            "original_path": media_path,
+                            "modality": "image",
+                        }
+                    })
+                except Exception as e:
+                    print(f"[Parser] DOCX image extraction skipped '{media_path}': {e}")
+    except Exception as e:
+        print(f"[Parser] DOCX image extraction failed: {e}")
+    return results
+
+
+def extract_images_from_file(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
+    """
+    ファイル形式に応じて埋め込み画像を抽出する。
+    戻り値: [{"image_bytes": bytes, "caption": str, "metadata": dict}, ...]
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".pdf":
+        return extract_images_from_pdf(file_bytes, filename)
+    elif ext == ".pptx":
+        return extract_images_from_pptx(file_bytes, filename)
+    elif ext == ".docx":
+        return extract_images_from_docx(file_bytes, filename)
+    elif ext in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]:
+        # 画像ファイルそのもの
+        return [{
+            "image_bytes": file_bytes,
+            "caption": filename,
+            "metadata": {"source": filename, "section": filename, "image_index": 0, "modality": "image"}
+        }]
+    return []
+
+
+# ------------------------------------------------------------------ #
+#  テキスト/チャンク抽出（既存 API 互換）                               #
+# ------------------------------------------------------------------ #
+
 def extract_document_sections(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
     """拡張子に応じてテキストセクションを抽出"""
     ext = os.path.splitext(filename)[1].lower()
@@ -109,15 +266,18 @@ def extract_document_sections(file_bytes: bytes, filename: str) -> List[Dict[str
         return extract_text_from_xlsx(file_bytes)
     elif ext in [".txt", ".md", ".csv", ".json"]:
         return extract_text_from_plain(file_bytes, filename)
+    elif ext in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]:
+        # 画像ファイルはテキスト抽出なし（画像インデックスへ登録）
+        return []
     else:
-        raise ValueError(f"未対応のファイル形式です: {ext} (対応形式: PDF, DOCX, PPTX, XLSX, TXT, MD, CSV)")
+        raise ValueError(f"未対応のファイル形式です: {ext} (対応形式: PDF, DOCX, PPTX, XLSX, TXT, MD, CSV, PNG, JPG等)")
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """テキストを指定サイズでオーバーラップさせながら分割"""
     if len(text) <= chunk_size:
         return [text]
-    
+
     chunks = []
     start = 0
     while start < len(text):
@@ -130,16 +290,21 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
     return chunks
 
 
-def parse_and_chunk_file(file_bytes: bytes, filename: str, chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
-    """ファイルをパースしてRAG検索用のチャンク一覧を生成"""
+def parse_and_chunk_file(
+    file_bytes: bytes,
+    filename: str,
+    chunk_size: int = 500,
+    overlap: int = 50
+) -> List[Dict[str, Any]]:
+    """ファイルをパースしてRAG検索用のチャンク一覧を生成（テキストのみ）"""
     sections = extract_document_sections(file_bytes, filename)
     all_chunks = []
-    
+
     for sec in sections:
         section_name = sec["section"]
         raw_text = sec["text"]
         text_chunks = chunk_text(raw_text, chunk_size=chunk_size, overlap=overlap)
-        
+
         for idx, ch in enumerate(text_chunks):
             all_chunks.append({
                 "content": ch,
@@ -147,7 +312,8 @@ def parse_and_chunk_file(file_bytes: bytes, filename: str, chunk_size: int = 500
                     "source": filename,
                     "section": section_name,
                     "chunk_index": idx,
-                    "total_chunks_in_section": len(text_chunks)
+                    "total_chunks_in_section": len(text_chunks),
+                    "modality": "text",
                 }
             })
     return all_chunks

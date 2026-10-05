@@ -7,11 +7,14 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # 依存パッケージのインストール
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションコードとMCPサーバーのコピー
@@ -27,17 +30,21 @@ ENV PYTHONUNBUFFERED=1 \
     CHROMA_DIR=/app/data/chroma \
     RURI_EMBED_MODEL=cl-nagoya/ruri-base \
     RURI_RERANK_MODEL=cl-nagoya/ruri-reranker-large \
+    MM_EMBED_MODEL=jinaai/jina-clip-v1 \
+    LOAD_MM_MODEL=true \
     PORT=8000
 
-# オフライン完全対応: ビルド時にRuriモデルをイメージ内キャッシュに事前ダウンロード
-# （イメージ作成後に完全オフライン・エアギャップ環境に持ち込んでも即座に動作可能）
+# オフライン完全対応: ビルド時にモデルをイメージ内キャッシュに事前ダウンロード
 ARG PRELOAD_MODELS=true
 RUN if [ "$PRELOAD_MODELS" = "true" ] ; then \
     python -c "\
 from sentence_transformers import SentenceTransformer, CrossEncoder; \
-print('Pre-downloading Ruri models for offline use...'); \
+print('Pre-downloading Ruri text embedding...'); \
 SentenceTransformer('cl-nagoya/ruri-base'); \
+print('Pre-downloading Ruri reranker...'); \
 CrossEncoder('cl-nagoya/ruri-reranker-large'); \
+print('Pre-downloading jina-clip-v1 (multimodal)...'); \
+SentenceTransformer('jinaai/jina-clip-v1', trust_remote_code=True); \
 print('Pre-download complete!')" ; \
     fi
 
@@ -48,7 +55,7 @@ ENV HF_HUB_OFFLINE=1 \
 EXPOSE 8000
 
 # ヘルスチェック
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # サーバー起動

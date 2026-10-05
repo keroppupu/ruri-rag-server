@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # アプリケーションコードとMCPサーバーのコピー
 COPY app /app/app
 COPY mcp_server.py /app/mcp_server.py
+COPY scripts /app/scripts
 
 # データ永続化およびHuggingFaceキャッシュディレクトリの作成
 RUN mkdir -p /app/data/chroma /app/cache/huggingface
@@ -36,23 +37,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # オフライン完全対応: ビルド時にモデルをイメージ内キャッシュに事前ダウンロード
 ARG PRELOAD_MODELS=true
-RUN if [ "$PRELOAD_MODELS" = "true" ] ; then \
-    python -c "\
-import sys; \
-from sentence_transformers import SentenceTransformer, CrossEncoder; \
-print('Pre-downloading Ruri text embedding...'); \
-SentenceTransformer('cl-nagoya/ruri-base'); \
-print('Pre-downloading Ruri reranker...'); \
-CrossEncoder('cl-nagoya/ruri-reranker-large'); \
-print('Ruri models downloaded successfully!'); \
-print('Pre-downloading jina-clip-v1 (multimodal)...'); \
-try: \n\
-    SentenceTransformer('jinaai/jina-clip-v1', trust_remote_code=True); \
-    print('jina-clip-v1 downloaded successfully!') \n\
-except Exception as e: \n\
-    print(f'WARNING: jina-clip-v1 preload failed (will download at runtime): {e}', file=sys.stderr) \n\
-print('Pre-download complete!')" ; \
-    fi
+RUN if [ "$PRELOAD_MODELS" = "true" ] ; then python /app/scripts/preload_models.py ; fi
 
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1

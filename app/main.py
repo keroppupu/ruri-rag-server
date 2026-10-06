@@ -90,16 +90,31 @@ def serve_index():
 
 @app.get("/health")
 def health():
-    mm_status = "loaded" if (rag_engine and rag_engine.mm_embed_model is not None) else "not_loaded"
-    return {
-        "status": "healthy",
-        "version": "3.0.0",
-        "text_embedding_model": EMBED_MODEL,
-        "multimodal_embedding_model": MM_EMBED_MODEL,
-        "multimodal_status": mm_status,
-        "reranker_model": RERANK_MODEL,
-        "channel_count": len(rag_engine.list_channels()) if rag_engine else 0,
-    }
+    try:
+        # エンジン初期化状態をチェック
+        if rag_engine is None:
+            return {
+                "status": "uninitialized",
+                "version": "3.0.0",
+                "message": "エンジン未初期化（起動直後またはエラー）"
+            }
+
+        mm_status = "loaded" if rag_engine.mm_embed_model is not None else "not_loaded"
+        return {
+            "status": "healthy",
+            "version": "3.0.0",
+            "text_embedding_model": EMBED_MODEL,
+            "multimodal_embedding_model": MM_EMBED_MODEL,
+            "multimodal_status": mm_status,
+            "reranker_model": RERANK_MODEL,
+            "channel_count": rag_engine.count("default") if hasattr(rag_engine, 'count') else 0,
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "version": "3.0.0",
+            "error": str(e)
+        }
 
 
 # ------------------------------------------------------------------ #

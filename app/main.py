@@ -14,9 +14,18 @@ EMBED_MODEL = os.getenv("RURI_EMBED_MODEL", "cl-nagoya/ruri-base")
 MM_EMBED_MODEL = os.getenv("MM_EMBED_MODEL", "jinaai/jina-clip-v1")
 RERANK_MODEL = os.getenv("RURI_RERANK_MODEL", "cl-nagoya/ruri-reranker-large")
 CHROMA_DIR = os.getenv("CHROMA_DIR", "/app/data/chroma")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
 LOAD_MM_MODEL = os.getenv("LOAD_MM_MODEL", "true").lower() in ("true", "1", "yes")
+
+# LLM設定 (デフォルト: Ollama, 設定ファイルまたは環境変数で指定可能)
+DEFAULT_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" または "litellm" (openai互換)
+DEFAULT_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
+
+DEFAULT_LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+DEFAULT_LITELLM_MODEL = os.getenv("LITELLM_MODEL", "gpt-4o-mini")
+DEFAULT_LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "")
+
+CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), "llm_config.json")
 
 app = FastAPI(
     title="Ruri ハイブリッド RAG サーバー",
@@ -48,8 +57,47 @@ def startup_event():
 
 
 # ------------------------------------------------------------------ #
-#  スキーマ定義                                                         #
+#  スキーマ定義 & LLM設定永続化                                         #
 # ------------------------------------------------------------------ #
+import json
+
+def get_current_llm_config() -> Dict[str, Any]:
+    config = {
+        "provider": DEFAULT_LLM_PROVIDER,
+        "ollama_base_url": DEFAULT_OLLAMA_BASE_URL,
+        "ollama_model": DEFAULT_OLLAMA_MODEL,
+        "litellm_base_url": DEFAULT_LITELLM_BASE_URL,
+        "litellm_model": DEFAULT_LITELLM_MODEL,
+        "litellm_api_key": DEFAULT_LITELLM_API_KEY
+    }
+    if os.path.exists(CONFIG_FILE_PATH):
+        try:
+            with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+                config.update(saved)
+        except Exception as e:
+            print(f"[Config] Error loading llm_config.json: {e}")
+    return config
+
+def save_current_llm_config(new_config: Dict[str, Any]):
+    current = get_current_llm_config()
+    current.update(new_config)
+    try:
+        with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
+            json.dump(current, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Config] Error saving llm_config.json: {e}")
+    return current
+
+
+class LLMConfigModel(BaseModel):
+    provider: str = Field("ollama", description="'ollama' または 'litellm'")
+    ollama_base_url: Optional[str] = Field("http://localhost:11434", description="Ollama API URL")
+    ollama_model: Optional[str] = Field("qwen3.5:9b", description="Ollama モデル名")
+    litellm_base_url: Optional[str] = Field("http://localhost:4000", description="LiteLLM / OpenAI互換 Base URL")
+    litellm_model: Optional[str] = Field("gpt-4o-mini", description="LiteLLM モデル名 (例: claude-3-5-sonnet, gpt-4o)")
+    litellm_api_key: Optional[str] = Field("", description="LiteLLM API Key (必要な場合)")
+
 
 class CreateChannelRequest(BaseModel):
     name: str = Field(..., description="チャネル名（英数字またはハイフン、日本語も可）")
@@ -74,6 +122,10 @@ class RAGRequest(BaseModel):
     generate_answer: bool = Field(True, description="LLMで回答を生成するか")
     system_prompt: Optional[str] = Field(None, description="カスタムシステムプロンプト")
     channel_id: Optional[str] = Field("default", description="対象チャネル")
+    llm_provider: Optional[str] = Field(None, description="上書きLLMプロバイダ ('ollama' / 'litellm')")
+    llm_base_url: Optional[str] = Field(None, description="上書きLLM URL")
+    llm_model: Optional[str] = Field(None, description="上書きLLMモデル名")
+    llm_api_key: Optional[str] = Field(None, description="上書きLiteLLM API Key")
 
 
 # ------------------------------------------------------------------ #
@@ -86,6 +138,21 @@ def serve_index():
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return {"message": "Ruri Hybrid RAG Server Running. UI file not found."}
+
+
+# --- LLM 設定 API ---
+
+@app.get("/config/llm")
+def get_llm_config():
+    """現在のLLM接続設定を取得"""
+    return get_current_llm_config()
+
+
+@app.post("/config/llm")
+def update_llm_config(req: LLMConfigModel):
+    """LLM接続設定（Ollama / LiteLLM）を更新・保存"""
+    saved = save_current_llm_config(req.model_dump())
+    return {"message": "LLM設定を更新しました", "config": saved}
 
 
 @app.get("/health")
@@ -370,26 +437,72 @@ async def rag_channel(channel_id: str, req: RAGRequest):
     answer = None
     llm_status = "ok"
 
+    # LLM設定の解決（リクエストパラメータ優先、次に保存済み設定）
+    current_config = get_current_llm_config()
+    provider = (req.llm_provider or current_config.get("provider") or "ollama").lower()
+
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "stream": False
+            if provider == "litellm":
+                # LiteLLM / OpenAI 互換 API 呼び出し (/v1/chat/completions)
+                base_url = (req.llm_base_url or current_config.get("litellm_base_url") or "http://localhost:4000").rstrip("/")
+                model = req.llm_model or current_config.get("litellm_model") or "gpt-4o-mini"
+                api_key = req.llm_api_key or current_config.get("litellm_api_key") or "sk-dummy"
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}" if api_key else ""
                 }
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                answer = data.get("message", {}).get("content", "")
+                endpoint = f"{base_url}/v1/chat/completions" if not base_url.endswith("/v1") else f"{base_url}/chat/completions"
+
+                resp = await client.post(
+                    endpoint,
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "temperature": 0.2
+                    }
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        answer = choices[0].get("message", {}).get("content", "")
+                    else:
+                        answer = ""
+                    llm_status = f"ok (LiteLLM: {model})"
+                else:
+                    llm_status = f"LiteLLM error: HTTP {resp.status_code} - {resp.text[:200]}"
+
             else:
-                llm_status = f"Ollama error: HTTP {resp.status_code}"
+                # Ollama API 呼び出し (/api/chat)
+                base_url = (req.llm_base_url or current_config.get("ollama_base_url") or "http://localhost:11434").rstrip("/")
+                model = req.llm_model or current_config.get("ollama_model") or "qwen3.5:9b"
+
+                resp = await client.post(
+                    f"{base_url}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "stream": False
+                    }
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    answer = data.get("message", {}).get("content", "")
+                    llm_status = f"ok (Ollama: {model})"
+                else:
+                    llm_status = f"Ollama error: HTTP {resp.status_code}"
+
     except Exception as e:
-        llm_status = f"LLM 接続スキップ/エラー: {str(e)}"
+        llm_status = f"LLM 接続エラー: {str(e)}"
 
     return {
         "channel": channel_id,

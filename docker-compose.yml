@@ -11,8 +11,12 @@ services:
       - RURI_RERANK_MODEL=cl-nagoya/ruri-reranker-large
       - MM_EMBED_MODEL=jinaai/jina-clip-v1
       - LOAD_MM_MODEL=true
+      - LLM_PROVIDER=ollama
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_MODEL=qwen3.5:9b
+      - LITELLM_BASE_URL=http://localhost:4000
+      - LITELLM_MODEL=gpt-4o-mini
+      - LITELLM_API_KEY=
       - CHROMA_DIR=/app/data/chroma
       - HF_HOME=/app/cache/huggingface
       - HF_HUB_OFFLINE=0

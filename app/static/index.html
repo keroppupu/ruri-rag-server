@@ -131,7 +131,7 @@
       <div class="tabs-bar">
         <button id="tabChatBtn" onclick="switchTab('chat')" class="tab-btn active">💬 RAG 対話 / 検索</button>
         <button id="tabUploadBtn" onclick="switchTab('upload')" class="tab-btn">📤 ファイル登録 (PDF / Excel / Word / PPT)</button>
-        <button id="tabDocsBtn" onclick="switchTab('docs')" class="tab-btn">📂 ドキュメント管理</button>
+        <button id="tabSettingsBtn" onclick="switchTab('settings')" class="tab-btn">⚙️ LLM 接続設定 (Ollama / LiteLLM)</button>
       </div>
 
       <!-- Tab: Chat -->
@@ -141,17 +141,29 @@
             <h3 style="color:var(--primary); font-size:0.95rem; font-weight:700; margin-bottom:4px;">RAG システム準備完了 (エアギャップ・オフライン完全対応)</h3>
             <p style="color:var(--text-muted); font-size:0.8rem;">
               左のサイドバーからチャネルを選択し、ドキュメントのアップロードや検索・質問を行えます。<br>
-              日本語特化モデル「Ruri」による高度なセマンティック検索とリランキング（再順位付け）が自動実行されます。
+              回答生成にはローカルの <strong>Ollama</strong> だけでなく、LAN上の <strong>LiteLLM (OpenAI互換)</strong> も選択可能です。
             </p>
           </div>
         </div>
 
         <div class="input-box">
-          <div class="input-options">
+          <div class="input-options" style="flex-wrap:wrap; gap:12px;">
             <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
               <input type="checkbox" id="genAnswerCheck" checked>
-              <span>Ollamaで回答生成 (qwen3.5:9b)</span>
+              <span>回答生成を行う</span>
             </label>
+            <span>|</span>
+            <label style="display:flex; align-items:center; gap:4px;">
+              <span>回答LLM:</span>
+              <select id="chatProviderSelect" onchange="handleChatProviderChange()" style="border:1px solid var(--border); border-radius:4px; padding:2px 6px; font-size:0.75rem; background:#fff; font-weight:600; color:var(--primary);">
+                <option value="default">共通設定を使用</option>
+                <option value="ollama">Ollama (ローカル)</option>
+                <option value="litellm">LiteLLM (LAN / OpenAI互換)</option>
+              </select>
+            </label>
+            <span id="activeModelBadge" style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:4px; font-size:0.7rem; font-weight:600;">
+              読込中...
+            </span>
             <span>|</span>
             <label style="display:flex; align-items:center; gap:4px;">
               <span>Rerank取得件数:</span>
@@ -223,6 +235,77 @@
           </div>
         </div>
       </div>
+
+      <!-- Tab: Settings (LLM接続設定: Ollama / LiteLLM) -->
+      <div id="tabSettings" class="tab-upload hidden">
+        <div class="upload-container">
+          <div class="upload-card">
+            <h2 style="font-size:1.05rem; font-weight:700; margin-bottom:4px; color:var(--primary);">⚙️ 回答生成 LLM 接続設定</h2>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:20px;">
+              RAGの回答生成に利用するLLMエンジンを切り替え・設定します。<br>
+              同一サーバー内の <strong>Ollama</strong> だけでなく、社内LANやリモート環境にある <strong>LiteLLM プロキシ (OpenAI互換API)</strong> を接続先に指定できます。
+            </p>
+
+            <div style="margin-bottom:18px;">
+              <label style="font-weight:700; font-size:0.85rem; display:block; margin-bottom:8px;">デフォルト使用プロバイダ:</label>
+              <div style="display:flex; gap:20px; font-size:0.85rem;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                  <input type="radio" name="llmProvider" value="ollama" id="providerOllama" onchange="toggleProviderSettings('ollama')" checked>
+                  <strong>Ollama (ローカル / 規定ポート: 11434)</strong>
+                </label>
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                  <input type="radio" name="llmProvider" value="litellm" id="providerLiteLLM" onchange="toggleProviderSettings('litellm')">
+                  <strong>LiteLLM (LAN上プロキシ / OpenAI互換)</strong>
+                </label>
+              </div>
+            </div>
+
+            <!-- Ollama 設定グループ -->
+            <div id="ollamaSettingsGroup" style="background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px;">
+              <h3 style="font-size:0.85rem; font-weight:700; color:var(--text); margin-bottom:12px;">🦙 Ollama 設定</h3>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; font-size:0.8rem;">
+                <div>
+                  <label style="font-weight:600; display:block; margin-bottom:4px;">Ollama Base URL:</label>
+                  <input type="text" id="cfgOllamaUrl" value="http://localhost:11434" class="param-input" placeholder="http://localhost:11434 または http://host.docker.internal:11434">
+                  <span style="font-size:0.7rem; color:var(--text-muted);">※ Docker内運用の場合は http://host.docker.internal:11434</span>
+                </div>
+                <div>
+                  <label style="font-weight:600; display:block; margin-bottom:4px;">モデル名:</label>
+                  <input type="text" id="cfgOllamaModel" value="qwen3.5:9b" class="param-input" placeholder="qwen3.5:9b, llama3.1, etc.">
+                </div>
+              </div>
+            </div>
+
+            <!-- LiteLLM 設定グループ -->
+            <div id="litellmSettingsGroup" style="background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px;">
+              <h3 style="font-size:0.85rem; font-weight:700; color:var(--text); margin-bottom:12px;">⚡ LiteLLM / LANプロキシ (OpenAI互換) 設定</h3>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; font-size:0.8rem; margin-bottom:12px;">
+                <div>
+                  <label style="font-weight:600; display:block; margin-bottom:4px;">LiteLLM Base URL (LAN IP / ホスト名):</label>
+                  <input type="text" id="cfgLiteLLMUrl" value="http://192.168.1.100:4000" class="param-input" placeholder="http://192.168.x.x:4000 または http://litellm-server:4000">
+                  <span style="font-size:0.7rem; color:var(--text-muted);">※ 接続先のエンドポイント (/v1/chat/completions が自動付与されます)</span>
+                </div>
+                <div>
+                  <label style="font-weight:600; display:block; margin-bottom:4px;">モデル名 (Model):</label>
+                  <input type="text" id="cfgLiteLLMModel" value="gpt-4o-mini" class="param-input" placeholder="claude-3-5-sonnet, gpt-4o, llama-3-70b など">
+                </div>
+              </div>
+              <div style="font-size:0.8rem;">
+                <label style="font-weight:600; display:block; margin-bottom:4px;">API Key (任意):</label>
+                <input type="password" id="cfgLiteLLMApiKey" class="param-input" placeholder="sk-... (認証不要の場合は空欄のままで可)">
+              </div>
+            </div>
+
+            <!-- 保存ボタン & ステータス表示 -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
+              <button onclick="handleSaveLLMConfig()" style="background:var(--primary); color:white; border:none; padding:10px 22px; border-radius:8px; font-size:0.85rem; font-weight:600; cursor:pointer;">
+                💾 設定を保存して反映
+              </button>
+              <span id="cfgSaveStatus" style="font-size:0.8rem; font-weight:600;"></span>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -233,6 +316,7 @@
     window.addEventListener("DOMContentLoaded", () => {
       fetchHealth();
       loadChannels();
+      loadLLMConfig();
     });
 
     async function fetchHealth() {
@@ -333,19 +417,146 @@
     function switchTab(tab) {
       const chatBtn = document.getElementById("tabChatBtn");
       const uploadBtn = document.getElementById("tabUploadBtn");
+      const settingsBtn = document.getElementById("tabSettingsBtn");
       const chatView = document.getElementById("tabChat");
       const uploadView = document.getElementById("tabUpload");
+      const settingsView = document.getElementById("tabSettings");
+
+      chatBtn.classList.remove("active");
+      uploadBtn.classList.remove("active");
+      settingsBtn.classList.remove("active");
+      chatView.classList.add("hidden");
+      uploadView.classList.add("hidden");
+      settingsView.classList.add("hidden");
 
       if (tab === "chat") {
         chatBtn.classList.add("active");
-        uploadBtn.classList.remove("active");
         chatView.classList.remove("hidden");
-        uploadView.classList.add("hidden");
-      } else {
+      } else if (tab === "upload") {
         uploadBtn.classList.add("active");
-        chatBtn.classList.remove("active");
         uploadView.classList.remove("hidden");
-        chatView.classList.add("hidden");
+      } else if (tab === "settings") {
+        settingsBtn.classList.add("active");
+        settingsView.classList.remove("hidden");
+        loadLLMConfig();
+      }
+    }
+
+    let currentLLMConfig = null;
+
+    async function loadLLMConfig() {
+      try {
+        const res = await fetch("/config/llm");
+        if (res.ok) {
+          currentLLMConfig = await res.json();
+          renderLLMConfig(currentLLMConfig);
+          updateModelBadge();
+        }
+      } catch (e) {
+        console.error("LLM設定取得エラー:", e);
+      }
+    }
+
+    function renderLLMConfig(cfg) {
+      if (!cfg) return;
+      if (cfg.provider === "litellm") {
+        document.getElementById("providerLiteLLM").checked = true;
+        toggleProviderSettings("litellm");
+      } else {
+        document.getElementById("providerOllama").checked = true;
+        toggleProviderSettings("ollama");
+      }
+      if (cfg.ollama_base_url) document.getElementById("cfgOllamaUrl").value = cfg.ollama_base_url;
+      if (cfg.ollama_model) document.getElementById("cfgOllamaModel").value = cfg.ollama_model;
+      if (cfg.litellm_base_url) document.getElementById("cfgLiteLLMUrl").value = cfg.litellm_base_url;
+      if (cfg.litellm_model) document.getElementById("cfgLiteLLMModel").value = cfg.litellm_model;
+      if (cfg.litellm_api_key) document.getElementById("cfgLiteLLMApiKey").value = cfg.litellm_api_key;
+    }
+
+    function toggleProviderSettings(prov) {
+      const ollamaGroup = document.getElementById("ollamaSettingsGroup");
+      const litellmGroup = document.getElementById("litellmSettingsGroup");
+      if (prov === "litellm") {
+        ollamaGroup.style.opacity = "0.5";
+        litellmGroup.style.opacity = "1";
+        litellmGroup.style.borderColor = "var(--primary)";
+        ollamaGroup.style.borderColor = "var(--border)";
+      } else {
+        ollamaGroup.style.opacity = "1";
+        litellmGroup.style.opacity = "0.5";
+        ollamaGroup.style.borderColor = "var(--primary)";
+        litellmGroup.style.borderColor = "var(--border)";
+      }
+    }
+
+    async function handleSaveLLMConfig() {
+      const statusEl = document.getElementById("cfgSaveStatus");
+      statusEl.textContent = "保存中...";
+      statusEl.style.color = "var(--text-muted)";
+
+      const provider = document.querySelector('input[name="llmProvider"]:checked').value;
+      const payload = {
+        provider: provider,
+        ollama_base_url: document.getElementById("cfgOllamaUrl").value.trim(),
+        ollama_model: document.getElementById("cfgOllamaModel").value.trim(),
+        litellm_base_url: document.getElementById("cfgLiteLLMUrl").value.trim(),
+        litellm_model: document.getElementById("cfgLiteLLMModel").value.trim(),
+        litellm_api_key: document.getElementById("cfgLiteLLMApiKey").value.trim(),
+      };
+
+      try {
+        const res = await fetch("/config/llm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          currentLLMConfig = data.config;
+          statusEl.textContent = "✅ 設定を保存しました！";
+          statusEl.style.color = "var(--success)";
+          updateModelBadge();
+          setTimeout(() => { statusEl.textContent = ""; }, 4000);
+        } else {
+          const err = await res.json();
+          statusEl.textContent = `❌ 保存失敗: ${err.detail || 'エラー'}`;
+          statusEl.style.color = "var(--danger)";
+        }
+      } catch (e) {
+        statusEl.textContent = `❌ 通信エラー: ${e.message}`;
+        statusEl.style.color = "var(--danger)";
+      }
+    }
+
+    function handleChatProviderChange() {
+      updateModelBadge();
+    }
+
+    function updateModelBadge() {
+      const badge = document.getElementById("activeModelBadge");
+      const override = document.getElementById("chatProviderSelect").value;
+      if (!currentLLMConfig) {
+        badge.textContent = "Ollama: qwen3.5:9b";
+        return;
+      }
+
+      let prov = currentLLMConfig.provider || "ollama";
+      if (override !== "default") {
+        prov = override;
+      }
+
+      if (prov === "litellm") {
+        const model = currentLLMConfig.litellm_model || "gpt-4o-mini";
+        const url = currentLLMConfig.litellm_base_url || "";
+        let host = url.replace(/^https?:\/\//, '').split('/')[0];
+        badge.textContent = `LiteLLM: ${model} (${host || 'LAN'})`;
+        badge.style.background = "#fef3c7";
+        badge.style.color = "#92400e";
+      } else {
+        const model = currentLLMConfig.ollama_model || "qwen3.5:9b";
+        badge.textContent = `Ollama: ${model}`;
+        badge.style.background = "#e0e7ff";
+        badge.style.color = "#3730a3";
       }
     }
 
@@ -508,16 +719,22 @@
       const botMsgId = "bot_" + Date.now();
       appendBotPlaceholder(botMsgId);
 
+      const selectedProvider = document.getElementById("chatProviderSelect").value;
+      const ragPayload = {
+        query: query,
+        initial_top_k: 10,
+        final_top_n: topN,
+        generate_answer: genAnswer
+      };
+      if (selectedProvider !== "default") {
+        ragPayload.llm_provider = selectedProvider;
+      }
+
       try {
         const res = await fetch(`/channels/${encodeURIComponent(activeChannel)}/rag`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query: query,
-            initial_top_k: 10,
-            final_top_n: topN,
-            generate_answer: genAnswer
-          })
+          body: JSON.stringify(ragPayload)
         });
 
         if (res.ok) {
@@ -566,6 +783,12 @@
 
       if (data.answer) {
         html += `<div style="white-space:pre-wrap; margin-bottom:12px;">${escapeHtml(data.answer)}</div>`;
+        if (data.llm_status) {
+          html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+            <span>🤖 生成エンジン:</span>
+            <code style="background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:0.7rem;">${escapeHtml(data.llm_status)}</code>
+          </div>`;
+        }
       } else {
         html += `<p style="color:var(--text-muted); font-size:0.75rem; margin-bottom:8px;">検索 & Rerank 完了 (回答生成なし)</p>`;
       }

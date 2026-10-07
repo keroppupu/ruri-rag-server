@@ -7,12 +7,16 @@ set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TAR_FILE="${DIR}/ruri-rag-server.tar"
+TARGZ_FILE="${DIR}/ruri-rag-server.tar.gz"
 
-if [ -f "${TAR_FILE}" ]; then
-  echo "=== [1/2] Dockerイメージをインポートしています... ==="
+if [ -f "${TARGZ_FILE}" ]; then
+  echo "=== [1/2] Dockerイメージ (tar.gz) をインポートしています... ==="
+  docker load < "${TARGZ_FILE}"
+elif [ -f "${TAR_FILE}" ]; then
+  echo "=== [1/2] Dockerイメージ (tar) をインポートしています... ==="
   docker load -i "${TAR_FILE}"
 else
-  echo "※ tar ファイルが見つかりません。既存のイメージを使用して起動します。"
+  echo "※ tar / tar.gz ファイルが見つかりません。既存のイメージを使用して起動します。"
 fi
 
 echo "=== [2/2] コンテナをバックグラウンド起動しています... ==="

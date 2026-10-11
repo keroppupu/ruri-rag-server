@@ -33,32 +33,44 @@ def main():
     models = {
         "ruri-base": "cl-nagoya/ruri-base",
         "ruri-reranker-large": "cl-nagoya/ruri-reranker-large",
-        "jina-clip-v1": "jinaai/jina-clip-v1",
     }
 
-    log(f"モデルを {HF_HOME} にプリロード中...")
+    models_dir = Path("/app/models")
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"モデルを {models_dir} にプリロード中...")
 
     try:
-        # Ruri モデル群
-        for name, repo_id in models.items():
-            if repo_id.startswith("cl-nagoya/"):
-                path = Path(HF_HOME) / repo_id.replace("/", "/")
-                snapshot_download(
-                    repo_id=repo_id,
-                    cache_dir=str(path),
-                    local_files_only=False,  # ネットワーク接続がある場合はダウンロード
-                    resume_download=True
-                )
-                log(f"✅ {name} をプリロードしました")
+        # Ruri Embedding モデル
+        base_dest = models_dir / "ruri-base"
+        log("Downloading cl-nagoya/ruri-base...")
+        snapshot_download(
+            repo_id="cl-nagoya/ruri-base",
+            local_dir=str(base_dest),
+            local_dir_use_symlinks=False,
+            local_files_only=False,
+            resume_download=True
+        )
+        log("✅ ruri-base をプリロードしました")
+
+        # Ruri Reranker モデル
+        rerank_dest = models_dir / "ruri-reranker-large"
+        log("Downloading cl-nagoya/ruri-reranker-large...")
+        snapshot_download(
+            repo_id="cl-nagoya/ruri-reranker-large",
+            local_dir=str(rerank_dest),
+            local_dir_use_symlinks=False,
+            local_files_only=False,
+            resume_download=True
+        )
+        log("✅ ruri-reranker-large をプリロードしました")
 
         log("モデルプリロードが完了しました")
         return 0
 
     except Exception as e:
-        # オフライン環境の場合、エラーを許容する
         log(f"❌ モデルダウンロードに失敗しました: {e}")
-        log("オフラインモードのため、モデルなしで起動します。")
-        sys.exit(0)
+        return 1
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

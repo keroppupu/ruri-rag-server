@@ -57,6 +57,21 @@ class HybridRAGEngine:
     - Ruri Reranker: 両インデックスの結果を統合してリランク
     """
 
+    def _resolve_model_path(self, model_name: str) -> str:
+        """ローカルに事前ダウンロードされたモデルディレクトリ (/app/models) があれば優先して使用"""
+        # cl-nagoya/ruri-base -> /app/models/ruri-base
+        short_name = model_name.split("/")[-1]
+        local_candidates = [
+            model_name,
+            os.path.join("/app/models", short_name),
+            os.path.join("/app/models", model_name),
+        ]
+        for path in local_candidates:
+            if os.path.exists(path) and os.path.isdir(path):
+                print(f"[HybridRAG] Found local model directory: {path}")
+                return path
+        return model_name
+
     def __init__(
         self,
         text_embed_model_name: str = "cl-nagoya/ruri-base",
@@ -72,8 +87,9 @@ class HybridRAGEngine:
         print(f"[HybridRAG] Using device: {self.device}")
 
         # --- テキスト用 Embedding (Ruri) ---
-        print(f"[HybridRAG] Loading Text Embedding: {text_embed_model_name}...")
-        self.text_embed_model = SentenceTransformer(text_embed_model_name, device=self.device)
+        actual_text_model = self._resolve_model_path(text_embed_model_name)
+        print(f"[HybridRAG] Loading Text Embedding: {actual_text_model}...")
+        self.text_embed_model = SentenceTransformer(actual_text_model, device=self.device)
         self.text_embed_dim = self.text_embed_model.get_sentence_embedding_dimension()
 
         # --- マルチモーダル Embedding ---
@@ -82,9 +98,10 @@ class HybridRAGEngine:
         self.load_mm_model = load_mm_model
         if load_mm_model:
             try:
-                print(f"[HybridRAG] Loading Multimodal Embedding: {mm_embed_model_name}...")
+                actual_mm_model = self._resolve_model_path(mm_embed_model_name)
+                print(f"[HybridRAG] Loading Multimodal Embedding: {actual_mm_model}...")
                 self.mm_embed_model = SentenceTransformer(
-                    mm_embed_model_name,
+                    actual_mm_model,
                     device=self.device,
                     trust_remote_code=True,
                 )
@@ -96,8 +113,9 @@ class HybridRAGEngine:
                 self.mm_embed_model = None
 
         # --- Reranker ---
-        print(f"[HybridRAG] Loading Reranker: {rerank_model_name}...")
-        self.reranker = CrossEncoder(rerank_model_name, device=self.device)
+        actual_rerank_model = self._resolve_model_path(rerank_model_name)
+        print(f"[HybridRAG] Loading Reranker: {actual_rerank_model}...")
+        self.reranker = CrossEncoder(actual_rerank_model, device=self.device)
 
         # --- ChromaDB ---
         os.makedirs(chroma_dir, exist_ok=True)

@@ -22,17 +22,17 @@ COPY app /app/app
 COPY mcp_server.py /app/mcp_server.py
 COPY scripts /app/scripts
 
-# データ永続化およびHuggingFaceキャッシュディレクトリの作成
-RUN mkdir -p /app/data/chroma /app/cache/huggingface
+# データ永続化およびモデル保存ディレクトリの作成
+RUN mkdir -p /app/data/chroma /app/models /app/cache/huggingface
 
 # 環境変数の設定
 ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/app/cache/huggingface \
     CHROMA_DIR=/app/data/chroma \
-    RURI_EMBED_MODEL=cl-nagoya/ruri-base \
-    RURI_RERANK_MODEL=cl-nagoya/ruri-reranker-large \
+    RURI_EMBED_MODEL=/app/models/ruri-base \
+    RURI_RERANK_MODEL=/app/models/ruri-reranker-large \
     MM_EMBED_MODEL=jinaai/jina-clip-v1 \
-    LOAD_MM_MODEL=true \
+    LOAD_MM_MODEL=false \
     PORT=8000
 
 # オフライン完全対応: ビルド時にモデルをイメージ内キャッシュに事前ダウンロード

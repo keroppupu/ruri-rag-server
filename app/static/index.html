@@ -188,7 +188,7 @@
             <h2 style="font-size:1rem; font-weight:700; margin-bottom:4px;">ファイルアップロード</h2>
             <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:16px;">
               現在のチャネル (<strong style="color:var(--primary);" class="activeChannelText">default</strong>) に文書を登録します。<br>
-              対応形式: <strong>PDF (.pdf), Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), Text (.txt, .md, .csv)</strong>
+              対応形式: <strong>PDF, Word, PPTX, Excel, Text, Markdown, ソースコード (.py, .js, .ts, .go, .java, .c, .cpp, .sh, .yaml, .html, .css, .sql 等)</strong>
             </p>
 
             <div id="dropzone" 
@@ -200,7 +200,7 @@
               <div style="font-size:2rem; margin-bottom:8px;">📄</div>
               <div class="drop-title">ここにファイルをドラッグ＆ドロップ、またはクリックして選択</div>
               <div class="drop-desc">自動でテキスト抽出・チャンク分割・Ruri埋め込みが行われます</div>
-              <input type="file" id="fileInput" style="display:none;" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv" onchange="handleFileSelect(event)">
+              <input type="file" id="fileInput" style="display:none;" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv,.json,.py,.pyw,.js,.mjs,.cjs,.ts,.tsx,.jsx,.go,.java,.c,.cpp,.cc,.cxx,.h,.hpp,.cs,.rs,.rb,.php,.sh,.bash,.zsh,.yaml,.yml,.xml,.html,.htm,.css,.scss,.sass,.less,.sql,.env,.toml,.ini,.conf,.cfg,.properties,.gradle,.kt,.kts,.swift,.scala,.lua,.pl,.r" onchange="handleFileSelect(event)">
             </div>
 
             <div class="upload-params">

@@ -272,14 +272,16 @@ def extract_document_sections(file_bytes: bytes, filename: str) -> List[Dict[str
         ".cs", ".rs", ".rb", ".php", ".sh", ".bash", ".zsh",
         ".yaml", ".yml", ".xml", ".html", ".htm", ".css", ".scss", ".sass", ".less",
         ".sql", ".env", ".toml", ".ini", ".conf", ".cfg", ".properties",
-        ".dockerfile", ".makefile", ".gradle", ".kt", ".kts", ".swift", ".scala", ".lua", ".pl", ".r"
+        ".dockerfile", ".makefile", ".gradle", ".kt", ".kts", ".swift", ".scala", ".lua", ".pl", ".r",
+        # Pro*C, COBOL, Pro*COBOL
+        ".pc", ".cbl", ".cob", ".cobol", ".pco", ".cpy"
     ] or os.path.basename(filename).lower() in ["dockerfile", "makefile", "jenkinsfile", "gemfile", "vagrantfile", "cmakelists.txt"]:
         return extract_text_from_plain(file_bytes, filename)
     elif ext in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]:
         # 画像ファイルはテキスト抽出なし（画像インデックスへ登録）
         return []
     else:
-        raise ValueError(f"未対応のファイル形式です: {ext} (対応形式: PDF, DOCX, PPTX, XLSX, TXT, MD, CSV, ソースコード[.py, .js, .ts, .go, .java, .c, .sh, .yaml等], 画像[PNG, JPG等])")
+        raise ValueError(f"未対応のファイル形式です: {ext} (対応形式: PDF, DOCX, PPTX, XLSX, TXT, MD, CSV, ソースコード[.py, .js, .ts, .go, .java, .c, .pc, .cbl, .pco, .sh, .yaml等], 画像[PNG, JPG等])")
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:

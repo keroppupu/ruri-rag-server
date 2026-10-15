@@ -11,7 +11,7 @@ from app.document_parser import parse_and_chunk_file, extract_images_from_file
 
 # 環境変数
 EMBED_MODEL = os.getenv("RURI_EMBED_MODEL", "cl-nagoya/ruri-base")
-MM_EMBED_MODEL = os.getenv("MM_EMBED_MODEL", "jinaai/jina-clip-v1")
+MM_EMBED_MODEL = os.getenv("MM_EMBED_MODEL", "google/embeddinggemma-2")
 RERANK_MODEL = os.getenv("RURI_RERANK_MODEL", "cl-nagoya/ruri-reranker-large")
 CHROMA_DIR = os.getenv("CHROMA_DIR", "/app/data/chroma")
 LOAD_MM_MODEL = os.getenv("LOAD_MM_MODEL", "true").lower() in ("true", "1", "yes")
@@ -385,7 +385,7 @@ def search_channel(channel_id: str, req: SearchRequest):
             "query": req.query,
             "results": results,
             "text_index": "ruri-base",
-            "image_index": "jina-clip-v1" if rag_engine.mm_embed_model else "disabled",
+            "image_index": getattr(rag_engine, "mm_model_name", "google/embeddinggemma-2") if rag_engine.mm_embed_model else "disabled",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"検索エラー: {str(e)}")

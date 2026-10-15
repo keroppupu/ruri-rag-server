@@ -31,8 +31,8 @@ ENV PYTHONUNBUFFERED=1 \
     CHROMA_DIR=/app/data/chroma \
     RURI_EMBED_MODEL=/app/models/ruri-base \
     RURI_RERANK_MODEL=/app/models/ruri-reranker-large \
-    MM_EMBED_MODEL=jinaai/jina-clip-v1 \
-    LOAD_MM_MODEL=false \
+    MM_EMBED_MODEL=google/embeddinggemma-2 \
+    LOAD_MM_MODEL=true \
     PORT=8000
 
 # オフライン完全対応: ビルド時にモデルをイメージ内キャッシュに事前ダウンロード

@@ -65,6 +65,24 @@ def main():
         )
         log("✅ ruri-reranker-large をプリロードしました")
 
+        # マルチモーダル (google/embeddinggemma-2)
+        mm_repo = os.getenv("MM_EMBED_MODEL", "google/embeddinggemma-2")
+        if mm_repo:
+            try:
+                mm_name = mm_repo.split("/")[-1]
+                mm_dest = models_dir / mm_name
+                log(f"Downloading {mm_repo} (multimodal)...")
+                snapshot_download(
+                    repo_id=mm_repo,
+                    local_dir=str(mm_dest),
+                    local_dir_use_symlinks=False,
+                    local_files_only=False,
+                    resume_download=True
+                )
+                log(f"✅ {mm_name} をプリロードしました")
+            except Exception as e:
+                log(f"⚠️ {mm_repo} のプリロードをスキップ (オンライン時にダウンロードまたはテキストのみモード稼働): {e}")
+
         log("モデルプリロードが完了しました")
         return 0
 

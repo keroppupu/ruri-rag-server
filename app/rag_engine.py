@@ -59,7 +59,7 @@ class HybridRAGEngine:
 
     def _resolve_model_path(self, model_name: str) -> str:
         """ローカルに事前ダウンロードされたモデルディレクトリ (/app/models) があれば優先して使用"""
-        # cl-nagoya/ruri-base -> /app/models/ruri-base
+        # cl-nagoya/ruri-base -> /app/models/ruri-base, google/embeddinggemma-2 -> /app/models/embeddinggemma-2
         short_name = model_name.split("/")[-1]
         local_candidates = [
             model_name,
@@ -75,7 +75,7 @@ class HybridRAGEngine:
     def __init__(
         self,
         text_embed_model_name: str = "cl-nagoya/ruri-base",
-        mm_embed_model_name: str = "jinaai/jina-clip-v1",
+        mm_embed_model_name: str = "google/embeddinggemma-2",
         rerank_model_name: str = "cl-nagoya/ruri-reranker-large",
         chroma_dir: str = "/app/data/chroma",
         default_channel: str = "default",
@@ -88,25 +88,26 @@ class HybridRAGEngine:
 
         # --- テキスト用 Embedding (Ruri) ---
         actual_text_model = self._resolve_model_path(text_embed_model_name)
-        print(f"[HybridRAG] Loading Text Embedding: {actual_text_model}...")
+        print(f"[HybridRAG] Loading Text Embedding (Ruri): {actual_text_model}...")
         self.text_embed_model = SentenceTransformer(actual_text_model, device=self.device)
         self.text_embed_dim = self.text_embed_model.get_sentence_embedding_dimension()
 
-        # --- マルチモーダル Embedding ---
+        # --- マルチモーダル Embedding (EmbeddingGemma-2 / 画像・オブジェクト用) ---
         self.mm_embed_model = None
         self.mm_embed_dim = None
+        self.mm_model_name = mm_embed_model_name
         self.load_mm_model = load_mm_model
         if load_mm_model:
             try:
                 actual_mm_model = self._resolve_model_path(mm_embed_model_name)
-                print(f"[HybridRAG] Loading Multimodal Embedding: {actual_mm_model}...")
+                print(f"[HybridRAG] Loading Multimodal Embedding (Gemma/MM): {actual_mm_model}...")
                 self.mm_embed_model = SentenceTransformer(
                     actual_mm_model,
                     device=self.device,
                     trust_remote_code=True,
                 )
                 self.mm_embed_dim = self.mm_embed_model.get_sentence_embedding_dimension()
-                print(f"[HybridRAG] Multimodal model loaded. dim={self.mm_embed_dim}")
+                print(f"[HybridRAG] Multimodal model loaded ({actual_mm_model}). dim={self.mm_embed_dim}")
             except Exception as e:
                 print(f"[HybridRAG] WARNING: Failed to load multimodal model: {e}")
                 print("[HybridRAG] Falling back to text-only mode.")
@@ -287,6 +288,16 @@ class HybridRAGEngine:
         )
         return ids
 
+    def _encode_image_inputs(self, images):
+        """EmbeddingGemma-2 / jina-clip / 一般的なSentenceTransformerマルチモーダルモデルへの入力形式の差異を吸収"""
+        try:
+            # 方式1: 直接 PIL.Image オブジェクト群を渡す
+            return self.mm_embed_model.encode(images, normalize_embeddings=True, batch_size=4).tolist()
+        except Exception:
+            # 方式2: {"image": img} 形式で渡す (EmbeddingGemma-2)
+            dict_inputs = [{"image": img} for img in images]
+            return self.mm_embed_model.encode(dict_inputs, normalize_embeddings=True, batch_size=4).tolist()
+
     def add_image_bytes(
         self,
         image_bytes_list: List[bytes],
@@ -296,8 +307,7 @@ class HybridRAGEngine:
         channel_id: str = "default",
     ) -> List[str]:
         """
-        実画像バイト列からマルチモーダルEmbeddingを生成してインデックスに登録。
-        jinaai/jina-clip-v1 は PIL.Image を直接受け取れる。
+        実画像バイト列からマルチモーダルEmbedding (EmbeddingGemma-2等) を生成してインデックスに登録。
         """
         if self.mm_embed_model is None:
             raise RuntimeError("マルチモーダルモデルが読み込まれていません")
@@ -315,9 +325,7 @@ class HybridRAGEngine:
         pil_images = [Image.open(io.BytesIO(b)).convert("RGB") for b in image_bytes_list]
 
         col = self._get_or_create_image_collection(channel_id)
-        embeddings = self.mm_embed_model.encode(
-            pil_images, normalize_embeddings=True, batch_size=4
-        ).tolist()
+        embeddings = self._encode_image_inputs(pil_images)
 
         for meta in metadatas:
             meta["modality"] = "image"
@@ -374,11 +382,11 @@ class HybridRAGEngine:
         """
         ハイブリッド検索 + Rerank:
         1. Ruri でテキストインデックスを検索
-        2. マルチモーダルモデルで画像インデックスを検索（モデルがあれば）
+        2. EmbeddingGemma-2 等のマルチモーダルモデルで画像インデックスを検索（モデルがあれば）
         3. RRF でスコア統合
         4. Ruri Reranker で最終ランキング
         """
-        # --- テキスト検索 ---
+        # --- テキスト検索 (Ruri) ---
         text_col = self._get_or_create_text_collection(channel_id)
         ruri_query = f"クエリ: {query}"
         text_embedding = self.text_embed_model.encode(
@@ -388,7 +396,7 @@ class HybridRAGEngine:
             text_col, text_embedding, initial_top_k, "text"
         )
 
-        # --- 画像インデックス検索 ---
+        # --- 画像インデックス検索 (EmbeddingGemma-2) ---
         image_results: List[Dict[str, Any]] = []
         if self.mm_embed_model is not None:
             image_col = self._get_or_create_image_collection(channel_id)
@@ -398,14 +406,17 @@ class HybridRAGEngine:
                     from PIL import Image
                     import io
                     pil_img = Image.open(io.BytesIO(query_image_bytes)).convert("RGB")
-                    mm_embedding = self.mm_embed_model.encode(
-                        [pil_img], normalize_embeddings=True
-                    )[0].tolist()
+                    mm_embedding = self._encode_image_inputs([pil_img])[0]
                 else:
                     # テキストクエリをマルチモーダルモデルでエンコード
-                    mm_embedding = self.mm_embed_model.encode(
-                        [query], normalize_embeddings=True
-                    )[0].tolist()
+                    try:
+                        mm_embedding = self.mm_embed_model.encode(
+                            [query], normalize_embeddings=True, prompt_name="SearchQuery"
+                        )[0].tolist()
+                    except Exception:
+                        mm_embedding = self.mm_embed_model.encode(
+                            [query], normalize_embeddings=True
+                        )[0].tolist()
                 image_results = self._search_collection(
                     image_col, mm_embedding, initial_top_k, "image"
                 )

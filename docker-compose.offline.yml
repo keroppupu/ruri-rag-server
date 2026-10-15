@@ -7,8 +7,8 @@ services:
     environment:
       - RURI_EMBED_MODEL=/app/models/ruri-base
       - RURI_RERANK_MODEL=/app/models/ruri-reranker-large
-      - MM_EMBED_MODEL=/app/models/jina-clip-v1
-      - LOAD_MM_MODEL=false
+      - MM_EMBED_MODEL=/app/models/embeddinggemma-2
+      - LOAD_MM_MODEL=true
       - LLM_PROVIDER=ollama
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_MODEL=qwen3.5:9b

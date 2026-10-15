@@ -9,7 +9,7 @@ services:
     environment:
       - RURI_EMBED_MODEL=cl-nagoya/ruri-base
       - RURI_RERANK_MODEL=cl-nagoya/ruri-reranker-large
-      - MM_EMBED_MODEL=jinaai/jina-clip-v1
+      - MM_EMBED_MODEL=google/embeddinggemma-2
       - LOAD_MM_MODEL=true
       - LLM_PROVIDER=ollama
       - OLLAMA_BASE_URL=http://host.docker.internal:11434

@@ -223,6 +223,15 @@ def get_channel_doc_count(channel_id: str):
     return {"channel": channel_id, "count": rag_engine.count(channel_id)}
 
 
+@app.get("/channels/{channel_id}/documents")
+def get_channel_documents(channel_id: str):
+    """チャネル内のドキュメント一覧（テキスト・画像）を取得"""
+    if not rag_engine:
+        raise HTTPException(status_code=503, detail="エンジン未初期化")
+    docs = rag_engine.get_documents_list(channel_id)
+    return {"channel": channel_id, "documents": docs, "total": len(docs)}
+
+
 @app.delete("/channels/{channel_id}/documents")
 def clear_channel_documents(channel_id: str):
     if not rag_engine:
@@ -319,9 +328,11 @@ async def upload_file_to_channel(
     if text_chunks_count == 0 and image_chunks_count == 0:
         raise HTTPException(status_code=400, detail="テキストも画像も抽出できませんでした")
 
+    total_chunks = text_chunks_count + image_chunks_count
     return {
         "message": f"'{filename}' を登録しました",
         "filename": filename,
+        "chunks_count": total_chunks,
         "text_chunks": text_chunks_count,
         "image_chunks": image_chunks_count,
         "channel": channel_id,

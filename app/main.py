@@ -1,9 +1,13 @@
 import os
+import json
+import uuid
+import asyncio
 from typing import List, Dict, Any, Optional
 import httpx
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.rag_engine import HybridRAGEngine
@@ -34,6 +38,15 @@ app = FastAPI(
         "RRF統合 & Ruri Rerankerによる高精度日本語RAGサーバー"
     ),
     version="3.0.0"
+)
+
+# CORS を全開放（GitLab Duo WebUI や別ホストからの呼び出しを許可）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 静的ファイルのパス解決
@@ -550,3 +563,282 @@ def legacy_search(req: SearchRequest):
 @app.post("/rag")
 async def legacy_rag(req: RAGRequest):
     return await rag_channel(req.channel_id or "default", req)
+
+
+# ------------------------------------------------------------------ #
+#  Model Context Protocol (MCP) HTTP / SSE エンドポイント             #
+#  GitLab Duo / WebUI 等から HTTP 経由で直接 MCP 連携するための実装    #
+# ------------------------------------------------------------------ #
+
+# セッションごとの SSE クライアントキュー管理
+mcp_sessions: Dict[str, asyncio.Queue] = {}
+
+MCP_TOOLS_SPEC = [
+    {
+        "name": "search_knowledge_base",
+        "description": "Ruriモデル（ruri-base + ruri-reranker-large）を用いて、指定チャネルのナレッジベースから高精度なセマンティック検索とリランクを実行し、関連ドキュメントを取得します。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "検索クエリ・質問文"
+                },
+                "channel_id": {
+                    "type": "string",
+                    "description": "検索対象のチャネル名（デフォルト: 'default'）",
+                    "default": "default"
+                },
+                "top_n": {
+                    "type": "integer",
+                    "description": "リランク後に返す上位ドキュメント件数（デフォルト: 3）",
+                    "default": 3
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "ask_rag",
+        "description": "指定チャネル内のドキュメントを検索・リランクし、Ollama/LiteLLM等のLLMを用いて回答を生成して返します。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "質問文"
+                },
+                "channel_id": {
+                    "type": "string",
+                    "description": "対象チャネル名（デフォルト: 'default'）",
+                    "default": "default"
+                },
+                "top_n": {
+                    "type": "integer",
+                    "description": "参照する根拠ドキュメント件数",
+                    "default": 3
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "list_channels",
+        "description": "利用可能なすべてのRAGチャネル名と、各チャネルに登録されているドキュメント件数のリストを取得します。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "add_document_to_channel",
+        "description": "テキストやソースコードデータを指定チャネルのナレッジベースに登録・ベクトル化します。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "登録するテキスト・ソースコード本文"
+                },
+                "channel_id": {
+                    "type": "string",
+                    "description": "登録先チャネル名（デフォルト: 'default'）",
+                    "default": "default"
+                },
+                "source": {
+                    "type": "string",
+                    "description": "ドキュメントの出典・ファイル名（例: 'GitLab MR !45'）"
+                }
+            },
+            "required": ["text"]
+        }
+    }
+]
+
+
+async def execute_mcp_tool(name: str, arguments: dict) -> str:
+    """MCP ツールの内部ディスパッチ実行"""
+    if not rag_engine:
+        return "エラー: RAGエンジンが初期化されていません"
+
+    channel_id = arguments.get("channel_id", "default")
+    top_n = int(arguments.get("top_n", 3))
+
+    if name == "list_channels":
+        channels = rag_engine.list_channels()
+        return json.dumps(channels, ensure_ascii=False, indent=2)
+
+    elif name == "search_knowledge_base":
+        query = arguments.get("query", "")
+        results = rag_engine.search(
+            query=query,
+            channel_id=channel_id,
+            initial_top_k=top_n * 3,
+            final_top_n=top_n
+        )
+        if not results:
+            return f"チャネル '{channel_id}' 内に関連するドキュメントは見つかりませんでした。"
+        formatted = []
+        for i, r in enumerate(results, 1):
+            src = r.get("metadata", {}).get("source", "不明")
+            score = r.get("rerank_score", 0)
+            formatted.append(f"[{i}] 出典: {src} (Rerankスコア: {score:.3f})\n{r.get('content', '')}")
+        return "\n\n".join(formatted)
+
+    elif name == "ask_rag":
+        query = arguments.get("query", "")
+        rag_res = await rag_channel(channel_id, RAGRequest(
+            query=query,
+            initial_top_k=top_n * 3,
+            final_top_n=top_n,
+            generate_answer=True
+        ))
+        ans = rag_res.get("answer") or "回答を生成できませんでした。"
+        contexts = rag_res.get("contexts", [])
+        sources = ", ".join(set([c.get("metadata", {}).get("source", "不明") for c in contexts]))
+        return f"{ans}\n\n(参照元: {sources})"
+
+    elif name in ("add_document_to_channel", "index_text"):
+        text = arguments.get("text", "")
+        source = arguments.get("source", "GitLab Duo MCP")
+        doc_ids = rag_engine.add_documents(
+            documents=[text],
+            metadatas=[{"source": source}],
+            channel_id=channel_id
+        )
+        return f"ドキュメントを登録しました (ID: {doc_ids[0]}, チャネル: '{channel_id}')"
+
+    else:
+        return f"未知のツール名です: {name}"
+
+
+async def handle_mcp_jsonrpc(msg: dict) -> Optional[dict]:
+    """JSON-RPC 2.0 リクエストの処理"""
+    msg_id = msg.get("id")
+    method = msg.get("method")
+    params = msg.get("params", {})
+
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "ruri-rag-mcp-http",
+                    "version": "3.0.0"
+                }
+            }
+        }
+
+    elif method == "notifications/initialized":
+        return None
+
+    elif method == "ping":
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
+
+    elif method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "tools": MCP_TOOLS_SPEC
+            }
+        }
+
+    elif method == "tools/call":
+        tool_name = params.get("name")
+        arguments = params.get("arguments", {})
+        result_text = await execute_mcp_tool(tool_name, arguments)
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": result_text
+                    }
+                ]
+            }
+        }
+
+    else:
+        if msg_id is not None:
+            return {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "error": {
+                    "code": -32601,
+                    "message": f"Method not found: {method}"
+                }
+            }
+        return None
+
+
+@app.get("/sse")
+async def mcp_sse_endpoint(request: Request):
+    """
+    MCP Server-Sent Events (SSE) エンドポイント
+    GitLab Duo などのクライアントが常時接続して JSON-RPC イベントを受信します。
+    """
+    session_id = str(uuid.uuid4())
+    queue: asyncio.Queue = asyncio.Queue()
+    mcp_sessions[session_id] = queue
+
+    # クライアントがリクエストメッセージを送るべき POST エンドポイント URL を通知
+    endpoint_url = f"/messages?sessionId={session_id}"
+
+    async def event_generator():
+        try:
+            # 接続直後に endpoint イベントを送信
+            yield f"event: endpoint\ndata: {endpoint_url}\n\n"
+
+            while True:
+                # 接続切断チェック
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"event: message\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    # Keep-Alive ping
+                    yield ": ping\n\n"
+        finally:
+            mcp_sessions.pop(session_id, None)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@app.post("/messages")
+async def mcp_messages_endpoint(request: Request, sessionId: str = Query(...)):
+    """
+    MCP クライアントからの JSON-RPC メッセージを受信し、
+    対応する SSE セッション経由でレスポンスを返します。
+    """
+    if sessionId not in mcp_sessions:
+        raise HTTPException(status_code=404, detail="無効なセッションIDです")
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+
+    response = await handle_mcp_jsonrpc(body)
+    if response is not None:
+        queue = mcp_sessions.get(sessionId)
+        if queue:
+            await queue.put(response)
+
+    return {"status": "accepted"}

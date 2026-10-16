@@ -582,6 +582,7 @@
       const chunkOverlap = document.getElementById("chunkOverlapInput").value || 50;
 
       for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const isImg = /\.(png|jpe?g|gif|bmp|tiff|webp)$/i.test(file.name);
         const statusItem = document.createElement("div");
         statusItem.className = "log-item";

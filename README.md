@@ -1,241 +1,225 @@
-# Ruri 日本語 RAG サーバー (v2.0)
+# Ruri マルチモーダル・ハイブリッド RAG サーバー (v3.0)
 
-名古屋大学 CL研究室が開発した高性能な日本語テキスト埋め込みモデル・リランカー **Ruri** を搭載した、マルチチャネル＆マルチフォーマット対応の Python / FastAPI 製 RAG サーバーです。
+名古屋大学 CL研究室が開発した高性能日本語テキスト埋め込みモデル・リランカー **Ruri** と、Google の **EmbeddingGemma-2** マルチモーダルモデルを統合した、完全オフライン対応の Python / FastAPI 製 RAG サーバーです。
 
-ブラウザから直接利用できる **Webフロントエンド**、**Office文書（Excel/Word/PowerPoint）および PDF の自動テキスト抽出・チャンク分割アップロード機能**、用途別に知識ベースを分離できる **チャネル機能** を備えています。
+テキスト文書・Office資料・ソースコード（レガシー言語含む）・画像ファイルを自動判別してベクトル化し、Reciprocal Rank Fusion (RRF) と CrossEncoder リランキングによる極めて精度の高い検索を実現します。
+
+ブラウザから直感的に操作できる **Webフロントエンド (Single Page App)**、用途別の **ナレッジチャネル機能**、**GitLab Duo (WebUI / VS Code) や OpenClaw 対応の Model Context Protocol (MCP)** を標準搭載しています。
 
 ---
 
-## 🌟 主な機能
+## 🌟 主な機能と特徴
 
-- **日本語特化モデル（Ruriシリーズ）**:
-  - **Embedding**: `cl-nagoya/ruri-base`（クエリには `クエリ: `、ドキュメントには `文章: ` を自動付与）
-  - **Reranking**: `cl-nagoya/ruri-reranker-large`（CrossEncoder による高精度な再スコアリング）
-- **マルチフォーマットファイル対応**:
-  - 📊 **Excel**: `.xlsx`, `.xls`（シート・行ごとにテキスト抽出）
-  - 📝 **Word**: `.docx`（段落・表組み抽出）
-  - 📽️ **PowerPoint**: `.pptx`（スライド単位で図形・テキスト枠抽出）
-  - 📄 **PDF**: `.pdf`（ページ単位抽出）
-  - 📑 **テキスト**: `.txt`, `.md`, `.csv`（UTF-8 / CP932 自動判定）
-- **RAG チャネル機能**:
-  - 部署別、プロジェクト別、ドキュメント種別ごとに独立した知識ベース（コレクション）を作成・切り替え可能。
-- **Web フロントエンド UI**:
-  - ブラウザ（`http://localhost:8000`）から直感的に操作可能。
-  - チャネルの作成・切替・削除
-  - ファイルのドラッグ＆ドロップ登録
-  - RAG 対話、検索結果および Rerank スコア・根拠文書のプレビュー
-- **LLM 連携**:
-  - ローカルの Ollama（`qwen3.5:9b` 等）へコンテキストを渡して回答生成。
+### 1. ハイブリッド Embedding & Rerank（テキスト＋マルチモーダル）
+- **日本語テキスト Embedding**: `cl-nagoya/ruri-base`（検索クエリには `クエリ: `、ドキュメントには `文章: ` を自動付与）
+- **画像・マルチモーダル Embedding**: `google/embeddinggemma-2`（図面、写真、スライド内埋め込み画像のセマンティックベクトル化）
+- **高精度リランキング**: `cl-nagoya/ruri-reranker-large`（CrossEncoder により検索候補を日本語文脈で再スコアリング）
+- **RRF (Reciprocal Rank Fusion)**: テキスト・画像それぞれの検索結果スコアを統合
+
+### 2. 豊富なファイルフォーマット・ソースコード対応
+- 📊 **Office 文書**:
+  - **Excel**: `.xlsx`, `.xls`（シート・行ごとのテキスト抽出）
+  - **Word**: `.docx`（段落・表組み抽出および埋め込み画像の自動抽出）
+  - **PowerPoint**: `.pptx`（スライド単位のテキスト抽出および埋め込み画像抽出）
+- 📄 **PDF**: `.pdf`（ページ単位のテキスト抽出およびページ内画像の自動抽出）
+- 💻 **ソースコード & 設定ファイル**:
+  - Python (`.py`, `.pyw`), JavaScript / TypeScript (`.js`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.jsx`)
+  - Go (`.go`), Java (`.java`, `.gradle`, `.kt`), C / C++ (`.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`)
+  - C# (`.cs`), Rust (`.rs`), Ruby (`.rb`), PHP (`.php`), Shell (`.sh`, `.bash`, `.zsh`)
+  - HTML (`.html`, `.htm`), CSS (`.css`, `.scss`), SQL (`.sql`), YAML (`.yaml`, `.yml`), JSON, XML
+  - 設定・定義: `.env`, `.toml`, `.ini`, `.conf`, `Dockerfile`, `Makefile` 等
+- 🏛️ **レガシー資産・業務言語**:
+  - **Pro\*C**: `.pc`
+  - **COBOL**: `.cbl`, `.cob`, `.cobol`, `.cpy`（Copybook）
+  - **Pro\*COBOL**: `.pco`
+  - エンコーディングフォールバック（UTF-8 $\rightarrow$ CP932 / Shift-JIS $\rightarrow$ UTF-8 ignore）により、レガシー文字コードも文字化けなくインデックス化
+- 🖼️ **単体画像ファイル**:
+  - `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.tiff`, `.webp`（マルチモーダルモデルによる画像ベクトル登録）
+
+### 3. 多彩な LLM 連携（回答生成）
+- **ローカル Ollama**: `qwen3.5:9b` 等のモデルと連携
+- **LAN上 LiteLLM (OpenAI互換)**: `gpt-4o-mini`, `gpt-oss-120b` などのプライベートゲートウェイと連携
+- Web UI の設定タブから API キー・エンドポイント URL・モデル名をワンクリックで即座に切り替え可能
+
+### 4. 2種類の MCP (Model Context Protocol) インターフェース
+- **HTTP / SSE トランスポート (`/sse`, `/messages`)**:
+  - GitLab Duo セルフホスト版の Web UI（Duo Chat / Duo Workflow）から同一LAN経由で直接 `http://<IP>:8000/sse` に接続可能
+  - CORS 全開放により、外部ホスト・ブラウザからの接続に対応
+- **標準入出力 (stdio) トランスポート (`mcp_server.py`)**:
+  - **OpenClaw**、VS Code (GitLab Duo 拡張)、Claude Desktop、Cursor 等から直接起動して利用可能
 
 ---
 
 ## 📂 ディレクトリ構成
 
-```
+```text
 ruri-rag-server/
-├── Dockerfile              # Docker ビルド定義
-├── docker-compose.yml      # データとモデルキャッシュ永続化設定
-├── requirements.txt        # 依存ライブラリ（FastAPI, PyPDF, python-docx, openpyxl等）
-├── .dockerignore
+├── Dockerfile                  # マルチステージ・完全オフライン対応 Dockerfile
+├── docker-compose.yml          # オンライン・開発環境用 Docker Compose
+├── docker-compose.offline.yml  # オフライン配信用 Docker Compose
+├── requirements.txt            # 依存パッケージ (sentence-transformers>=6.1.0, transformers>=5.0.0等)
+├── mcp_server.py               # stdio 形式 MCP サーバー (OpenClaw / VS Code用)
 ├── README.md
-├── test_client.py          # API テストスクリプト
+├── docs/
+│   └── UPDATE_INDEX_HTML_OFFLINE.md # オフライン環境での Web UI 差し替え手順書
+├── scripts/
+│   ├── export_offline_package.sh    # RHEL / Linux x86_64 用オフラインパッケージ作成
+│   ├── preload_models.py            # ビルド時のモデル事前キャッシュスクリプト
+│   └── run_offline.sh               # 配布パッケージ自動起動スクリプト
 └── app/
-    ├── __init__.py
-    ├── main.py             # FastAPI エンドポイント & Web ルーティング
-    ├── rag_engine.py       # Ruri埋め込み・リランカー・ChromaDB操作ロジック
-    ├── document_parser.py  # PDF/Word/PPTX/Excel パース & チャンカー
+    ├── main.py                 # FastAPI エンドポイント, SSE MCP, CORS
+    ├── rag_engine.py           # Ruri + Gemma-2 + Reranker + ChromaDB エンジン
+    ├── document_parser.py      # マルチフォーマット文書・コード・画像パーサー
     └── static/
-        └── index.html      # Webフロントエンド Single Page Application
+        └── index.html          # Web フロントエンド SPA
 ```
 
 ---
 
 ## 🚀 起動方法
 
-### 1. 通常の起動（オンライン環境）
-
-```bash
-cd /Users/pupu/.gemini/antigravity/scratch/ruri-rag-server
-
-# ビルドしてバックグラウンド起動
-docker compose up --build -d
-
-# ログ確認（初回のモデルダウンロード状況など）
-docker compose logs -f
-```
-
-起動後、ブラウザで **`http://localhost:8000`** にアクセスすると Web UI が利用できます。
-
----
-
-## 🔒 完全オフライン（エアギャップ環境）でのセットアップ手順
-
-インターネットに接続されていない閉域環境に持ち込んでセットアップ・稼働させる手順です。
-本システムは **「Dockerイメージのパッケージ化」** と **「Ollamaモデルの移行」** の2ステップで完全にオフライン動作します。
-
-### ステップ 1: オンラインマシンでの準備（USBへのエクスポート）
-
-#### 1-1. RAG サーバーのオフラインパッケージを作成
-同梱のパッケージ作成スクリプトを実行すると、Ruriモデルを内包したDockerイメージと起動設定が `offline_dist/` フォルダに自動出力されます。
+### A. 通常の起動（オンライン環境・開発用）
 
 ```bash
 cd ruri-rag-server
-./scripts/export_offline_package.sh
-```
-出力された **`offline_dist` フォルダ** を USB メモリ等にコピーします。
 
-#### 1-2. Ollama の LLM モデルをダウンロードしてコピー
-ホストマシンで Ollama のモデル（`qwen3.5:9b` 等）を事前取得します。
+# Docker コンテナをビルドして起動
+docker compose up --build -d
 
-```bash
-ollama pull qwen3.5:9b
+# ログ確認
+docker compose logs -f
 ```
-Ollama のモデルファイル一式（保存場所: `~/.ollama/models`）を USB メモリにコピーします。
+
+起動後、ブラウザで **`http://localhost:8000`** にアクセスすると Web UI を利用できます。
 
 ---
 
-### ステップ 2: オフライン（閉域）マシンでのセットアップ＆起動
+### B. 完全オフライン環境（RHEL / 閉塞LAN）での起動
 
-USB メモリをオフラインマシンに接続します。
+インターネットに接続されていないエアギャップ（閉塞）環境へは、GitHub Releases に配置されている事前ビルド済みパッケージを利用してデプロイできます。
 
-#### 2-1. Ollama の配置と起動
-オフラインマシンの `~/.ollama/models` にモデルファイルを配置して起動します。
-
-```bash
-# モデルファイルを配置
-mkdir -p ~/.ollama/models
-cp -r /path/to/usb/models/* ~/.ollama/models/
-
-# Ollama サーバーを起動
-ollama serve
-```
-
-#### 2-2. RAG サーバーの起動
-USB の `offline_dist` フォルダ内で、起動スクリプトを実行するだけです。
-
-```bash
-cd /path/to/usb/offline_dist
-
-# イメージのインポートとコンテナ起動をワンクリック実行
-./start.sh
-```
-
-これだけで、**ネットワーク通信を一切行わずに** ブラウザ（`http://localhost:8000`）から全機能（ファイル読み込み・チャネル管理・Ruri検索・LLM回答）が即座に利用可能になります。
-
+1. **パッケージのダウンロード（GitHub Releases）**:
+   - [Releases ページ](https://github.com/keroppupu/ruri-rag-server/releases) から最新タグ（例: `ver7`）のアセットをダウンロードします：
+     - `offline_dist.tar.gz.part_aa`
+     - `offline_dist.tar.gz.part_ab`
+     - `join_and_extract.sh`
+2. **オフラインサーバーでの結合・展開**:
+   ```bash
+   chmod +x join_and_extract.sh
+   ./join_and_extract.sh
+   ```
+3. **起動**:
+   ```bash
+   cd offline_dist
+   ./start.sh
+   ```
+   ※ Dockerイメージの自動ロードとコンテナ起動が行われ、外部ネットワーク通信なしで全モデル（Ruri-base, Ruri-reranker, EmbeddingGemma-2）が即座に立ち上がります。
 
 ---
 
 ## 🌐 Web UI の使い方
 
-1. **チャネルの選択・新規作成**:
-   - 左サイドバーの「新規」ボタンから、用途に合わせたチャネル名（例: `sales_docs`, `manual`, `product_spec`）を作成し、クリックして選択します。
-2. **ファイルのアップロード**:
-   - 上部タブの「ファイル登録」を開き、PDF、Word、Excel、PowerPoint などをドラッグ＆ドロップします。
-   - 自動的にテキストが抽出され、チャンク分割された上で Ruri ベクトル化されます。
-3. **対話・検索**:
-   - 「RAG 対話 / 検索」タブで質問を入力すると、Ruri による検索・リランクが行われ、関連するドキュメントとその Rerank スコアが表示されます。
-   - 「Ollama で回答を生成」を有効にすると、ローカル LLM が自動的に回答を生成します。
-
----
-
-## 📡 主な REST API エンドポイント
-
-### 1. チャネル管理
-- `GET /channels`: 全チャネル一覧の取得
-- `POST /channels`: 新規チャネル作成 (`{"name": "tech_docs"}`)
-- `DELETE /channels/{channel_id}`: チャネルとその全データの削除
-
-### 2. ファイルアップロード
-- `POST /channels/{channel_id}/upload`: マルチパート形式でファイルをアップロード
-  - `file`: アップロードファイル（PDF, DOCX, PPTX, XLSX, TXT 等）
-  - `chunk_size`: チャンク文字数（デフォルト: 500）
-  - `chunk_overlap`: 重複文字数（デフォルト: 50）
-
-```bash
-curl -X POST "http://localhost:8000/channels/tech_docs/upload" \
-  -F "file=@/path/to/document.pdf" \
-  -F "chunk_size=500"
-```
-
-### 3. 検索 & Rerank
-- `POST /channels/{channel_id}/search`: 指定チャネル内での 1次ベクトル検索 + 2次 CrossEncoder リランク
-
-```bash
-curl -X POST "http://localhost:8000/channels/tech_docs/search" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "システムの仕様について教えて",
-    "initial_top_k": 10,
-    "final_top_n": 3
-  }'
-```
-
-### 4. RAG 回答生成
-- `POST /channels/{channel_id}/rag`: 指定チャネルの関連文書を抽出して Ollama 等で回答生成
-
-```bash
-curl -X POST "http://localhost:8000/channels/tech_docs/rag" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "認証方式は何が採用されていますか？",
-    "initial_top_k": 10,
-    "final_top_n": 3,
-    "generate_answer": true
-  }'
-```
+1. **チャネルの作成・切替**:
+   - 画面左のチャネル一覧から用途別のナレッジベース（例: `system-manual`, `legacy-cobol-src`, `design-docs`）を作成・選択します。
+2. **ファイルの登録**:
+   - 「ファイル登録」タブを開き、PDF、Office文書、各種ソースコード（.py, .java, .pc, .cbl等）、画像（.png, .jpg等）をドラッグ＆ドロップします。
+   - テキストはチャンク分割されて Ruri に、画像は EmbeddingGemma-2 に自動でインデックス化されます。
+3. **ドキュメント管理**:
+   - 「登録ドキュメント」タブで、チャネル内に登録された文書や画像を一覧確認し、個別削除できます。
+4. **RAG 検索 & チャット**:
+   - 「RAG 対話 / 検索」タブで質問を入力すると、セマンティック検索とリランキングを実行し、スコアと参照元を表示します。
+   - 「回答を生成」を有効にすると、設定された LLM（Ollama または LiteLLM）から根拠に基づく回答が生成されます。
+5. **LLM 設定タブ**:
+   - 回答生成に使用するプロバイダ（Ollama / LiteLLM）、接続先 URL、モデル名を GUI から変更・保存できます。
 
 ---
 
 ## 🔌 Model Context Protocol (MCP) 連携
 
-本 RAG サーバーには、**GitLab Duo / GitLab Workflow (VS Code) / Claude Desktop / Cursor / Antigravity** 等の AI クライアントから直接ナレッジ検索・質問ができる **MCP サーバー (`mcp_server.py`)** が同梱されています。
-
-### 提供ツール一覧
+### 1. 提供ツール一覧
 
 | ツール名 | 説明 |
 | :--- | :--- |
-| `search_knowledge_base` | Ruriモデル（Embedding + Rerank）でチャネル内を検索し、高精度な根拠テキストを取得 |
-| `ask_rag` | ドキュメント検索とローカル LLM（Ollama）回答生成を一括実行 |
-| `list_channels` | 登録済みチャネル一覧と各ドキュメント件数を取得 |
-| `index_text` | テキストデータを指定チャネルに直接登録・ベクトル化 |
+| `search_knowledge_base` | Ruri + Gemma-2 + Reranker による高精度なハイブリッドセマンティック検索 |
+| `ask_rag` | 指定チャネル内ドキュメントを検索・リランクし、LLM による回答生成を一括実行 |
+| `list_channels` | 登録済みチャネル一覧とドキュメント件数を取得 |
+| `add_document_to_channel` | テキスト・ソースコード等のデータを指定チャネルに直接登録・ベクトル化 |
 
-### GitLab Duo / VS Code での設定例
+---
 
-VS Code の `settings.json`（または GitLab Duo の MCP 設定ファイル）に以下を追加します：
+### 2. GitLab Duo WebUI（セルフホスト版）での設定
+GitLab Duo WebUI（Duo Chat / Duo Workflow）の MCP 設定画面にて、**HTTP / SSE URL** を指定します：
 
-```json
-{
-  "gitlab.duo.mcpServers": {
-    "ruri-rag": {
-      "command": "python3",
-      "args": ["/絶対パス/ruri-rag-server/mcp_server.py"],
-      "env": {
-        "RAG_SERVER_URL": "http://localhost:8000"
-      }
-    }
-  }
-}
+```text
+http://<RAGサーバーのLAN_IP>:8000/sse
 ```
 
-※ Docker コンテナ経由で実行する場合:
+> **閉塞環境でのファイアウォール確認**:
+> RAGサーバー側（RHEL 等）でファイアウォールが有効な場合は、ポート 8000 を開放してください：
+> ```bash
+> sudo firewall-cmd --add-port=8000/tcp --permanent
+> sudo firewall-cmd --reload
+> ```
+
+---
+
+### 3. OpenClaw での設定
+OpenClaw の CLI から Docker コンテナ経由で MCP サーバーを登録します：
+
+```bash
+openclaw mcp add ruri-rag \
+  --command docker \
+  --arg exec \
+  --arg -i \
+  --arg ruri-rag-server \
+  --arg python \
+  --arg mcp_server.py
+```
+
+登録確認:
+```bash
+openclaw mcp probe ruri-rag
+```
+
+---
+
+### 4. VS Code (GitLab Duo / Claude / Cursor) での設定
+VS Code の設定ファイル（`settings.json` または MCP 設定）に以下を追加します：
+
 ```json
 {
-  "gitlab.duo.mcpServers": {
+  "mcpServers": {
     "ruri-rag": {
       "command": "docker",
-      "args": ["exec", "-i", "ruri-rag-server", "python3", "/app/mcp_server.py"]
+      "args": ["exec", "-i", "ruri-rag-server", "python", "mcp_server.py"]
     }
   }
 }
 ```
 
-設定後、GitLab Duo Chat や AI チャットで「社内規定チャネルから〇〇の仕様を調べて」と入力すると、自動的に Ruri RAG の検索ツールが実行されて高精度な回答が生成されます。
+※ リモートホスト上の RAG サーバーに手元の PC から接続する場合は、手元に `mcp_server.py` を配置し、環境変数 `RAG_SERVER_URL` に `http://<RAGサーバーIP>:8000` を指定して実行することも可能です。
+
+---
+
+## 📡 主な REST API エンドポイント
+
+| メソッド | パス | 説明 |
+| :--- | :--- | :--- |
+| `GET` | `/health` | サーバーおよび各モデル（テキスト・マルチモーダル）の稼働状態確認 |
+| `GET` | `/channels` | 全チャネル一覧の取得 |
+| `POST` | `/channels` | 新規チャネルの作成 (`{"name": "..."}`) |
+| `DELETE` | `/channels/{id}` | チャネルおよびデータの削除 |
+| `GET` | `/channels/{id}/documents` | チャネル内のドキュメント（テキスト・画像）一覧取得 |
+| `DELETE` | `/channels/{id}/documents/{doc_id}` | 指定ドキュメントの個別削除 |
+| `POST` | `/channels/{id}/upload` | マルチパート形式によるファイル・ソースコード・画像の登録 |
+| `POST` | `/channels/{id}/search` | ベクトル検索 + CrossEncoder リランキング |
+| `POST` | `/channels/{id}/rag` | RAG 検索 + LLM 回答生成 |
+| `GET` | `/sse` | MCP Server-Sent Events エンドポイント |
+| `POST` | `/messages` | MCP JSON-RPC メッセージ受付エンドポイント |
 
 ---
 
 ## 🛠️ オフライン運用・メンテナンス
 
 - **[オフラインDockerコンテナ内の `index.html` 差し替え手順](docs/UPDATE_INDEX_HTML_OFFLINE.md)**:
-  Dockerイメージ全体を再転送・再ビルドすることなく、稼働中コンテナのWeb UI（`index.html`）のみを上書き更新する手順を記載しています。
-
-
+  Dockerイメージ全体を再転送することなく、稼働中コンテナのWeb UI（`index.html`）のみを即座に上書き更新する手順書です。

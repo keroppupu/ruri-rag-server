@@ -687,20 +687,23 @@ async def execute_mcp_tool(name: str, arguments: dict) -> str:
 
     elif name == "search_knowledge_base":
         query = arguments.get("query", "")
-        results = rag_engine.search(
-            query=query,
-            channel_id=channel_id,
-            initial_top_k=top_n * 3,
-            final_top_n=top_n
-        )
-        if not results:
-            return f"チャネル '{channel_id}' 内に関連するドキュメントは見つかりませんでした。"
-        formatted = []
-        for i, r in enumerate(results, 1):
-            src = r.get("metadata", {}).get("source", "不明")
-            score = r.get("rerank_score", 0)
-            formatted.append(f"[{i}] 出典: {src} (Rerankスコア: {score:.3f})\n{r.get('content', '')}")
-        return "\n\n".join(formatted)
+        try:
+            results = rag_engine.search_and_rerank(
+                query=query,
+                channel_id=channel_id,
+                initial_top_k=top_n * 3,
+                final_top_n=top_n
+            )
+            if not results:
+                return f"チャネル '{channel_id}' 内に関連するドキュメントは見つかりませんでした。"
+            formatted = []
+            for i, r in enumerate(results, 1):
+                src = r.get("metadata", {}).get("source", "不明")
+                score = r.get("rerank_score", 0)
+                formatted.append(f"[{i}] 出典: {src} (Rerankスコア: {score:.3f})\n{r.get('content', '')}")
+            return "\n\n".join(formatted)
+        except Exception as e:
+            return f"検索実行エラー: {str(e)}"
 
     elif name == "ask_rag":
         query = arguments.get("query", "")

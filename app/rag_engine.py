@@ -458,16 +458,16 @@ class HybridRAGEngine:
             col = col_getter(channel_id)
             if col.count() == 0:
                 continue
-            raw = col.get(include=["documents", "ids", "metadatas"])
-            docs_flat = [d for dl in (raw.get("documents") or [[]]) for d in dl]
-            ids_flat = [i for il in (raw.get("ids") or [[]]) for i in il]
-            metas_flat = [m for ml in (raw.get("metadatas") or [[]]) for m in ml]
-            for doc_id, content, meta in zip(ids_flat, docs_flat, metas_flat):
+            raw = col.get(include=["documents", "metadatas"])
+            ids_list = raw.get("ids") or []
+            docs_list = raw.get("documents") or []
+            metas_list = raw.get("metadatas") or []
+            for doc_id, content, meta in zip(ids_list, docs_list, metas_list):
                 results.append({
                     "id": doc_id,
-                    "content": content,
+                    "content": content or "",
                     "metadata": meta or {},
-                    "length": len(content),
+                    "length": len(content) if content else 0,
                     "modality": label,
                 })
         return results

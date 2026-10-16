@@ -320,26 +320,43 @@ async def upload_file_to_channel(
         raise HTTPException(status_code=500, detail=f"テキスト解析エラー: {str(e)}")
 
     # --- 画像抽出・登録 ---
-    if index_images and rag_engine.mm_embed_model is not None:
+    image_indexing_error = None
+    if index_images:
         try:
             image_data = extract_images_from_file(file_bytes, filename)
             if image_data:
-                image_bytes_list = [d["image_bytes"] for d in image_data]
-                captions = [d["caption"] for d in image_data]
-                metadatas_img = [d["metadata"] for d in image_data]
-                img_ids = rag_engine.add_image_bytes(
-                    image_bytes_list=image_bytes_list,
-                    captions=captions,
-                    metadatas=metadatas_img,
-                    channel_id=channel_id,
-                )
-                image_chunks_count = len(img_ids)
+                if rag_engine.mm_embed_model is not None:
+                    # マルチモーダルモデルによる画像ベクトル化
+                    image_bytes_list = [d["image_bytes"] for d in image_data]
+                    captions = [d["caption"] for d in image_data]
+                    metadatas_img = [d["metadata"] for d in image_data]
+                    img_ids = rag_engine.add_image_bytes(
+                        image_bytes_list=image_bytes_list,
+                        captions=captions,
+                        metadatas=metadatas_img,
+                        channel_id=channel_id,
+                    )
+                    image_chunks_count = len(img_ids)
+                else:
+                    # マルチモーダルモデルがロードされていない場合はファイル名/キャプションをテキストインデックスにフォールバック登録
+                    captions = [d["caption"] for d in image_data]
+                    metas = [d["metadata"] for d in image_data]
+                    doc_ids = rag_engine.add_documents(
+                        documents=captions,
+                        metadatas=metas,
+                        channel_id=channel_id,
+                        modality="text",
+                    )
+                    text_chunks_count += len(doc_ids)
         except Exception as e:
-            # 画像登録失敗はエラーにせず警告として返す
+            image_indexing_error = str(e)
             print(f"[Upload] Image indexing failed for '{filename}': {e}")
 
     if text_chunks_count == 0 and image_chunks_count == 0:
-        raise HTTPException(status_code=400, detail="テキストも画像も抽出できませんでした")
+        err_msg = f"'{filename}' からテキストまたは画像を抽出できませんでした。"
+        if image_indexing_error:
+            err_msg += f" (画像処理エラー: {image_indexing_error})"
+        raise HTTPException(status_code=400, detail=err_msg)
 
     total_chunks = text_chunks_count + image_chunks_count
     return {

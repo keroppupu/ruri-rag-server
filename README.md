@@ -231,3 +231,11 @@ VS Code の `settings.json`（または GitLab Duo の MCP 設定ファイル）
 
 設定後、GitLab Duo Chat や AI チャットで「社内規定チャネルから〇〇の仕様を調べて」と入力すると、自動的に Ruri RAG の検索ツールが実行されて高精度な回答が生成されます。
 
+---
+
+## 🛠️ オフライン運用・メンテナンス
+
+- **[オフラインDockerコンテナ内の `index.html` 差し替え手順](docs/UPDATE_INDEX_HTML_OFFLINE.md)**:
+  Dockerイメージ全体を再転送・再ビルドすることなく、稼働中コンテナのWeb UI（`index.html`）のみを上書き更新する手順を記載しています。
+
+

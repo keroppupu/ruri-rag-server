@@ -6,8 +6,10 @@ RAG サーバーの /rag (または /channels/{channel_id}/rag) エンドポイ�
 """
 
 import json
+import os
+import base64
 import requests
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # RAG サーバーのホストURL (デフォルト: http://localhost:8000)
 RAG_SERVER_URL = "http://localhost:8000"
@@ -19,6 +21,8 @@ def ask_rag(
     initial_top_k: int = 10,
     final_top_n: int = 3,
     system_prompt: Optional[str] = None,
+    # 質問添付ファイル（比較・照合・差分分析用）
+    attach_file_paths: Optional[List[str]] = None,
     # 必要に応じてLLM接続情報をリクエスト単位で上書き可能
     llm_provider: Optional[str] = None,   # "ollama" または "litellm"
     llm_base_url: Optional[str] = None,   # 例: "http://host.docker.internal:11434"
@@ -27,7 +31,7 @@ def ask_rag(
 ) -> Optional[Dict[str, Any]]:
     """
     RAGサーバーの推論API (/rag) をキックして、
-    ハイブリッド検索(Ruri+EmbeddingGemma) + Rerank + LLM推論結果を取得します。
+    ハイブリッド検索(Ruri+EmbeddingGemma) + Rerank + 添付ファイル比較 + LLM推論結果を取得します。
     """
     endpoint = f"{server_url.rstrip('/')}/channels/{channel_id}/rag"
 
@@ -47,6 +51,20 @@ def ask_rag(
         payload["llm_base_url"] = llm_base_url
     if llm_model:
         payload["llm_model"] = llm_model
+
+    if attach_file_paths:
+        attached_list = []
+        for fpath in attach_file_paths:
+            if os.path.exists(fpath):
+                fname = os.path.basename(fpath)
+                with open(fpath, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode("utf-8")
+                attached_list.append({
+                    "filename": fname,
+                    "content_base64": b64_data
+                })
+        if attached_list:
+            payload["attached_files"] = attached_list
 
     try:
         response = requests.post(

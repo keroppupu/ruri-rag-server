@@ -62,13 +62,13 @@ TOOLS = [
     },
     {
         "name": "ask_rag",
-        "description": "指定チャネル内のドキュメントを検索・リランクし、OllamaなどのローカルLLMを用いて回答を生成して返します。",
+        "description": "指定チャネル内のドキュメントを検索・リランクし、OllamaなどのローカルLLMを用いて回答を生成して返します。質問ファイル（添付ファイル）を同時に渡してRAGナレッジとの比較・照合・差分分析を行うことも可能です。",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "質問文"
+                    "description": "質問文または比較・分析指示"
                 },
                 "channel_id": {
                     "type": "string",
@@ -79,6 +79,14 @@ TOOLS = [
                     "type": "integer",
                     "description": "参照する根拠ドキュメント件数",
                     "default": 3
+                },
+                "attached_file_name": {
+                    "type": "string",
+                    "description": "質問に添付するファイル名（例: 'main.py', 'spec.txt'）"
+                },
+                "attached_file_content": {
+                    "type": "string",
+                    "description": "質問に添付するテキスト内容（またはBase64データ）"
                 }
             },
             "required": ["query"]
@@ -147,12 +155,21 @@ def handle_tool_call(tool_name: str, arguments: dict) -> str:
             query = arguments["query"]
             channel_id = arguments.get("channel_id", "default")
             top_n = arguments.get("top_n", 3)
-            res = http_post(f"/channels/{channel_id}/rag", {
+            rag_payload = {
                 "query": query,
                 "initial_top_k": top_n * 3,
                 "final_top_n": top_n,
                 "generate_answer": True
-            })
+            }
+            att_name = arguments.get("attached_file_name")
+            att_content = arguments.get("attached_file_content")
+            if att_name and att_content:
+                rag_payload["attached_files"] = [{
+                    "filename": att_name,
+                    "text_content": att_content
+                }]
+
+            res = http_post(f"/channels/{channel_id}/rag", rag_payload)
             answer = res.get("answer") or "回答を生成できませんでした。"
             contexts = res.get("contexts", [])
             sources = ", ".join(set([c.get("metadata", {}).get("source", "不明") for c in contexts]))

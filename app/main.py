@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import asyncio
+import base64
 from typing import List, Dict, Any, Optional
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
@@ -128,6 +129,11 @@ class SearchRequest(BaseModel):
     final_top_n: int = Field(3, description="Rerank後に返す上位件数")
     channel_id: Optional[str] = Field("default", description="対象チャネル")
 
+class AttachedFileInput(BaseModel):
+    filename: str = Field(..., description="添付ファイル名 (拡張子付き)")
+    content_base64: Optional[str] = Field(None, description="Base64エンコードされたファイルバイナリデータ")
+    text_content: Optional[str] = Field(None, description="テキストファイルの場合の直接テキスト内容")
+
 class RAGRequest(BaseModel):
     query: str = Field(..., description="質問文")
     initial_top_k: int = Field(10, description="一次検索件数")
@@ -139,6 +145,8 @@ class RAGRequest(BaseModel):
     llm_base_url: Optional[str] = Field(None, description="上書きLLM URL")
     llm_model: Optional[str] = Field(None, description="上書きLLMモデル名")
     llm_api_key: Optional[str] = Field(None, description="上書きLiteLLM API Key")
+    # 質問添付ファイル（比較・分析用）
+    attached_files: Optional[List[AttachedFileInput]] = Field(None, description="質問時に添付してRAGナレッジと比較・照合するファイル一覧")
 
 
 # ------------------------------------------------------------------ #
@@ -453,7 +461,33 @@ async def rag_channel(channel_id: str, req: RAGRequest):
             "answer": None,
         }
 
-    # 2. プロンプト生成
+    # 2. 質問添付ファイルの展開・パース（比較・照合領域）
+    attached_docs_str = ""
+    if req.attached_files:
+        attached_sections = []
+        for att in req.attached_files:
+            fname = att.filename
+            extracted_text = ""
+            if att.text_content:
+                extracted_text = att.text_content.strip()
+            elif att.content_base64:
+                try:
+                    fbytes = base64.b64decode(att.content_base64)
+                    chunks = parse_and_chunk_file(file_bytes=fbytes, filename=fname, chunk_size=1500, overlap=100)
+                    if chunks:
+                        extracted_text = "\n\n".join([f"[{c['metadata'].get('section', '本文')}] {c['content']}" for c in chunks])
+                    else:
+                        extracted_text = "（テキスト情報を抽出できませんでした）"
+                except Exception as ex:
+                    extracted_text = f"（添付ファイル展開エラー: {str(ex)}）"
+            
+            if extracted_text:
+                attached_sections.append(f"### 【添付ファイル: {fname}】\n{extracted_text}")
+        
+        if attached_sections:
+            attached_docs_str = "\n\n".join(attached_sections)
+
+    # 3. プロンプト生成
     context_str = "\n\n".join([
         f"[{i+1}] (出典: {item.get('metadata', {}).get('source', '不明')}"
         f", モダリティ: {item.get('source_modality', '?')}) {item['content']}"
@@ -461,12 +495,30 @@ async def rag_channel(channel_id: str, req: RAGRequest):
     ])
 
     system = req.system_prompt or (
-        "あなたは親切なAIアシスタントです。"
-        "提供された参考情報（テキスト・図表のキャプションを含む）に基づいて、"
-        "正確かつ簡潔に日本語で回答してください。"
-        "参考情報にない場合はその旨を正直に述べてください。"
+        "あなたは親切で高度な分析能力を持つAIアシスタントです。"
+        "提供されたナレッジベース（RAG参考情報）およびユーザーが添付した対象ファイル情報に基づいて、"
+        "比較・照合・差分分析・整合性チェックや質問への回答を正確かつ分かりやすく日本語で作成してください。"
+        "ナレッジや添付ファイルにない事項については、推測を交えずその旨を明記してください。"
     )
-    user_prompt = f"""以下の参考情報を基に質問に答えてください。
+
+    if attached_docs_str:
+        user_prompt = f"""以下の【ユーザー添付ファイル】と【RAGナレッジベース参考情報】を照合・比較し、【質問・指示】に答えてください。
+
+==================================================
+【ユーザー添付ファイル（比較・分析対象）】
+{attached_docs_str}
+==================================================
+
+==================================================
+【RAGナレッジベース参考情報（既存知識・仕様・規約等）】
+{context_str if context_str else "（関連する参考情報は見つかりませんでした）"}
+==================================================
+
+【質問・指示】
+{req.query}
+"""
+    else:
+        user_prompt = f"""以下の参考情報を基に質問に答えてください。
 
 【参考情報】
 {context_str if context_str else "（関連する参考情報は見つかりませんでした）"}
@@ -555,6 +607,43 @@ async def rag_channel(channel_id: str, req: RAGRequest):
     }
 
 
+@app.post("/channels/{channel_id}/rag_with_file")
+async def rag_with_file_upload(
+    channel_id: str,
+    query: str = Form(..., description="質問または指示内容"),
+    file: UploadFile = File(..., description="照合・比較対象の添付ファイル"),
+    initial_top_k: int = Form(10),
+    final_top_n: int = Form(3),
+    system_prompt: Optional[str] = Form(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_base_url: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
+):
+    """
+    ファイルを直接マルチパートフォームデータとしてアップロードし、
+    RAGナレッジベースと一括比較・推論を行うエンドポイント。
+    """
+    file_bytes = await file.read()
+    b64_content = base64.b64encode(file_bytes).decode("utf-8")
+    attached = AttachedFileInput(
+        filename=file.filename,
+        content_base64=b64_content
+    )
+    req = RAGRequest(
+        query=query,
+        initial_top_k=initial_top_k,
+        final_top_n=final_top_n,
+        generate_answer=True,
+        system_prompt=system_prompt,
+        channel_id=channel_id,
+        llm_provider=llm_provider,
+        llm_base_url=llm_base_url,
+        llm_model=llm_model,
+        attached_files=[attached]
+    )
+    return await rag_channel(channel_id=channel_id, req=req)
+
+
 # ------------------------------------------------------------------ #
 #  後方互換エンドポイント (default チャネル)                           #
 # ------------------------------------------------------------------ #
@@ -617,13 +706,13 @@ MCP_TOOLS_SPEC = [
     },
     {
         "name": "ask_rag",
-        "description": "指定チャネル内のドキュメントを検索・リランクし、Ollama/LiteLLM等のLLMを用いて回答を生成して返します。",
+        "description": "指定チャネル内のドキュメントを検索・リランクし、Ollama/LiteLLM等のLLMを用いて回答を生成して返します。質問ファイル（添付ファイル）を同時に渡してRAGナレッジとの比較・照合・差分分析を行うことも可能です。",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "質問文"
+                    "description": "質問文または比較・分析指示"
                 },
                 "channel_id": {
                     "type": "string",
@@ -634,6 +723,14 @@ MCP_TOOLS_SPEC = [
                     "type": "integer",
                     "description": "参照する根拠ドキュメント件数",
                     "default": 3
+                },
+                "attached_file_name": {
+                    "type": "string",
+                    "description": "質問に添付するファイル名（例: 'main.py', 'spec.txt'）"
+                },
+                "attached_file_content": {
+                    "type": "string",
+                    "description": "質問に添付するテキスト内容（またはBase64データ）"
                 }
             },
             "required": ["query"]
@@ -707,11 +804,21 @@ async def execute_mcp_tool(name: str, arguments: dict) -> str:
 
     elif name == "ask_rag":
         query = arguments.get("query", "")
+        att_files = None
+        att_name = arguments.get("attached_file_name")
+        att_content = arguments.get("attached_file_content")
+        if att_name and att_content:
+            att_files = [AttachedFileInput(
+                filename=att_name,
+                text_content=att_content
+            )]
+
         rag_res = await rag_channel(channel_id, RAGRequest(
             query=query,
             initial_top_k=top_n * 3,
             final_top_n=top_n,
-            generate_answer=True
+            generate_answer=True,
+            attached_files=att_files
         ))
         ans = rag_res.get("answer") or "回答を生成できませんでした。"
         contexts = rag_res.get("contexts", [])
